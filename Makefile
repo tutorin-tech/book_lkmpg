@@ -17,6 +17,9 @@ html: lkmpg.tex html.cfg assets/Manrope_variable.ttf
 indent:
 	(cd examples; find . -name '*.[ch]' | xargs clang-format -i)
 
+epub: html html/index.html
+	pandoc --resource-path=html --toc --toc-depth=5 --standalone --css=lkmpg.css --to epub3 html/index.html --output $(PROJ).epub
+
 clean:
 	rm -f *.dvi *.aux *.log *.ps *.pdf *.out lkmpg.bbl lkmpg.blg lkmpg.lof lkmpg.toc lkmpg.fdb_latexmk lkmpg.fls
 	rm -rf html
