@@ -1,0 +1,4 @@
+{{{{NavigationArrows
+| prev_chapter = {prev_chapter_link}
+| next_chapter = {next_chapter_link}
+}}}}

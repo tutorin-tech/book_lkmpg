@@ -1,0 +1,27 @@
+name: deploy-mediawiki
+
+on:
+  push:
+    branches:
+      - tnt-main
+
+jobs:
+  deploying:
+    name: Deploy book to MediaWiki
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v1
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Build book in the MediaWiki format
+        run: |
+          ./scripts/convert_to_mediawiki.sh

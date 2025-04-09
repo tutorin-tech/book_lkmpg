@@ -1,0 +1,22 @@
+body {
+    font-family: ubuntu, sans-serif;
+    font-style: normal;
+    font-weight: 300;
+}
+
+pre {
+    overflow-x: scroll;
+    white-space: revert;
+}
+
+@media screen and (max-width: 515px) {
+    .mw-file-element {
+        height: auto !important;
+        width: 40vh !important;
+    }
+
+    .mw-file-element[alt="216a+ 28b+ c"] {
+        height: auto !important;
+        width: 15vh !important;
+    }
+}

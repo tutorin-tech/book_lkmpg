@@ -1,0 +1,10 @@
+{{BookCard
+| title            = The Linux Kernel Module Programming Guide
+| headerstyle      = (defaults to background-color:grey)
+| image            = [[File:060x.svg|200px]]
+| publication_date = {{int:March}} 10, 2025
+| language         = 🇬🇧 {{int:English}}
+| sections         = Linux
+| authors          = Peter Jay Salzman, Michael Burian, Ori Pomerantz, Bob Mottram, Jim Huang
+| license          = OSL 3.0
+}}
