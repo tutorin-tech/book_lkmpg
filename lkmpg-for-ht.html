@@ -18,7 +18,7 @@
 
 <h2 class='titleHead'>The Linux Kernel Module Programming Guide</h2>
 <div class='author'><span class='ecrm-1200'>Peter Jay Salzman, Michael Burian, Ori Pomerantz, Bob Mottram, Jim Huang</span></div><br />
-<div class='date'><span class='ecrm-1200'>May 20, 2025</span></div>
+<div class='date'><span class='ecrm-1200'>July 25, 2025</span></div>
                                                                   
 
                                                                   
@@ -101,9 +101,8 @@
 <br />    <span class='sectionToc'>21 <a href='#where-to-go-from-here' id='QQ2-1-73'>Where To Go From Here?</a></span>
    </div>
    <h3 class='sectionHead' id='introduction'><span class='titlemark'>1   </span> <a id='x1-10001'></a>Introduction</h3>
-<!-- l. 65 --><p class='noindent'>The Linux Kernel Module Programming Guide is a free book; you may reproduce
-and/or modify it under the terms of the <a href='https://opensource.org/licenses/OSL-3.0'>Open Software License</a>, version
-3.0.
+<!-- l. 65 --><p class='noindent'>The Linux Kernel Module Programming Guide is a free book; you may reproduce or
+modify it under the terms of the <a href='https://opensource.org/licenses/OSL-3.0'>Open Software License</a>, version 3.0.
 </p><!-- l. 67 --><p class='indent'>   This book is distributed in the hope that it would be useful, but without any
 warranty, without even the implied warranty of merchantability or fitness for a
 particular purpose.
@@ -123,7 +122,7 @@ code available for your revisions. Please make revisions and updates available d
 to the document maintainer, Jim Huang &lt;jserv@ccns.ncku.edu.tw&gt;. This will allow
 for the merging of updates and provide consistent revisions to the Linux
 community.
-</p><!-- l. 77 --><p class='indent'>   If you publish or distribute this book commercially, donations, royalties, and/or
+</p><!-- l. 77 --><p class='indent'>   If you publish or distribute this book commercially, donations, royalties, or
 printed copies are greatly appreciated by the author and the <a href='https://tldp.org/'>Linux Documentation
 Project</a> (LDP). Contributing in this way shows your support for free software and
 the LDP. If you have questions or comments, please contact the address
@@ -248,9 +247,9 @@ seamlessly.
      errors, consider compiling a kernel with modversioning turned off.
      </li>
 <li class='enumerate' id='x1-8005x2'>
-     <!-- l. 173 --><p class='noindent'>Using X Window System. It is highly recommended to extract, compile,
-     and load all the examples discussed in this guide from a console. Working
-     on these tasks within the X Window System is discouraged.
+     <!-- l. 173 --><p class='noindent'>Using  the  X  Window  System.  It  is  highly  recommended  to  extract,
+     compile, and load all the examples discussed in this guide from a console.
+     Working on these tasks within the X Window System is discouraged.
      </p><!-- l. 177 --><p class='noindent'>Modules cannot directly print to the screen like <code>  <span class='ectt-1000'>printf()</span>
      </code> can,  but  they  can  log  information  and  warnings  that  are  eventually
      displayed on the screen, specifically within a console. If a module is loaded
@@ -270,10 +269,10 @@ seamlessly.
      equipment manufacturer. Certain Linux distributions even ship with the
      default Linux kernel configured to support SecureBoot. In these cases, the
      kernel module necessitates a signed security key.
-     </p><!-- l. 189 --><p class='noindent'>Failing this, an attempt to insert your first “hello world” module would
+     </p><!-- l. 189 --><p class='noindent'>Failing that, an attempt to insert your first “hello world” module would
      result in the message: “<span class='ecti-1000'>ERROR: could not insert module</span>”. If this message
-     <span class='ecti-1000'>Lockdown: insmod: unsigned module loading is restricted; see man kernel
-     </span><span class='ecti-1000'>lockdown.7 </span>appears in the <code>  <span class='ectt-1000'>dmesg</span>
+     “<span class='ecti-1000'>Lockdown: insmod: unsigned module loading is restricted; see man kernel
+     </span><span class='ecti-1000'>lockdown.7</span>” appears in the <code>  <span class='ectt-1000'>dmesg</span>
      </code> output, the simplest approach involves disabling UEFI SecureBoot from
      the boot menu of your PC or laptop, allowing the successful insertion
      of  “hello  world”  module.  Naturally,  an  alternative  involves  undergoing
@@ -291,7 +290,7 @@ kernel.
    <pre class='fancyvrb' id='fancyvrb6'><a id='x1-9004r1'></a><span class='ecrm-0500'>1</span><span class='ectt-1000'>sudo apt-get update</span> 
 <a id='x1-9006r2'></a><span class='ecrm-0500'>2</span><span class='ectt-1000'>apt-cache search linux-headers-</span><span id='textcolor1'><span class='tctt-1000'>`</span></span><span class='ectt-1000'>uname -r</span><span id='textcolor2'><span class='tctt-1000'>`</span></span></pre>
 <!-- l. 210 --><p class='indent'>   The following command provides information on the available kernel header files.
-Then for example: 
+Then, for example: 
 </p>
    <pre class='fancyvrb' id='fancyvrb7'><a id='x1-9009r1'></a><span class='ecrm-0500'>1</span><span class='ectt-1000'>sudo apt-get install linux-headers-</span><span id='textcolor3'><span class='tctt-1000'>`</span></span><span class='ectt-1000'>uname -r</span><span id='textcolor4'><span class='tctt-1000'>`</span></span></pre>
 <!-- l. 216 --><p class='indent'>   On Arch Linux: 
@@ -340,7 +339,7 @@ aspects of writing a kernel module.
 <a id='x1-12022r8'></a><span class='ecrm-0500'>8</span><span class='ectt-0800'>{</span> 
 <a id='x1-12024r9'></a><span class='ecrm-0500'>9</span><span class='ectt-0800'>    pr_info(</span><span id='textcolor14'><span class='ectt-0800'>"Hello world 1.</span></span><span id='textcolor15'><span class='ectt-0800'>\n</span></span><span id='textcolor16'><span class='ectt-0800'>"</span></span><span class='ectt-0800'>);</span> 
 <a id='x1-12026r10'></a><span class='ecrm-0500'>10</span> 
-<a id='x1-12028r11'></a><span class='ecrm-0500'>11</span><span class='ectt-0800'>    </span><span id='textcolor17'><span class='ectt-0800'>/* A non 0 return means init_module failed; module can</span><span class='tctt-0800'>'</span><span class='ectt-0800'>t be loaded. */</span></span> 
+<a id='x1-12028r11'></a><span class='ecrm-0500'>11</span><span class='ectt-0800'>    </span><span id='textcolor17'><span class='ectt-0800'>/* A nonzero return means init_module failed; module can</span><span class='tctt-0800'>'</span><span class='ectt-0800'>t be loaded. */</span></span> 
 <a id='x1-12030r12'></a><span class='ecrm-0500'>12</span><span class='ectt-0800'>    </span><span id='textcolor18'><span class='ectt-0800'>return</span></span><span class='ectt-0800'> 0;</span> 
 <a id='x1-12032r13'></a><span class='ecrm-0500'>13</span><span class='ectt-0800'>}</span> 
 <a id='x1-12034r14'></a><span class='ecrm-0500'>14</span> 
@@ -366,9 +365,9 @@ to use <span class='ecti-1000'>tabs</span>, not spaces.
                                                                   
 
                                                                   
-<!-- l. 267 --><p class='indent'>   In <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>Makefile</span></span></span>, <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>$(CURDIR)</span></span></span> can set to the absolute pathname of the current working
-directory(after all <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>-C</span></span></span> options are processed, if any). See more about <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>CURDIR</span></span></span> in <a href='https://www.gnu.org/software/make/manual/make.html'>GNU
-make manual</a>.
+<!-- l. 267 --><p class='indent'>   In <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>Makefile</span></span></span>, <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>$(CURDIR)</span></span></span> can be set to the absolute pathname of the current
+working directory (after all <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>-C</span></span></span> options are processed, if any). See more about <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>CURDIR</span></span></span>
+in <a href='https://www.gnu.org/software/make/manual/make.html'>GNU make manual</a>.
 </p><!-- l. 270 --><p class='indent'>   And finally, just run <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>make</span></span></span> directly.
 </p><!-- l. 1 --><p class='indent'>
 </p>
@@ -396,8 +395,8 @@ above.
 </p>
    <pre class='fancyvrb' id='fancyvrb14'><a id='x1-12080r1'></a><span class='ecrm-0500'>1</span><span class='ectt-0800'>all:</span> 
 <a id='x1-12082r2'></a><span class='ecrm-0500'>2</span><span class='ectt-0800'>    echo </span><span class='colorbox' id='colorbox32'><span class='ectt-0800'>$</span></span><span class='ectt-0800'>(PWD)</span></pre>
-<!-- l. 295 --><p class='indent'>   Then, we can use <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>-p</span></span></span> flag to print out the environment variable values from the
-Makefile.
+<!-- l. 295 --><p class='indent'>   Then, we can use the <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>-p</span></span></span> flag to print out the environment variable values from
+the Makefile.
                                                                   
 
                                                                   
@@ -1229,7 +1228,7 @@ codespace.
    <h4 class='subsectionHead' id='code-space'><span class='titlemark'>5.5   </span> <a id='x1-240005.5'></a>Code space</h4>
 <!-- l. 808 --><p class='noindent'>Memory management is a very complicated subject and the majority of O’Reilly’s
 <a href='https://www.oreilly.com/library/view/understanding-the-linux/0596005652/'>Understanding The Linux Kernel</a> exclusively covers memory management!
-We are not setting out to be experts on memory managements, but we do
+We are not setting out to be experts on memory management, but we do
 need to know a couple of facts to even begin worrying about writing real
 modules.
 </p><!-- l. 811 --><p class='indent'>   If you have not thought about what a segfault really means, you may be surprised
@@ -1241,7 +1240,7 @@ would know about. This memory begins with 0x00000000 and extends up to
                                                                   
 
                                                                   
-whatever it needs to be. Since the memory space for any two processes do not
+whatever it needs to be. Since the memory space for any two processes does not
 overlap, every process that can access a memory address, say 0xbffff978, would
 be accessing a different location in real physical memory! The processes
 would be accessing an index named 0xbffff978 which points to some kind of
@@ -1483,7 +1482,7 @@ function. Also, its name is a bit misleading; it represents an abstract open
 <code> <span class='ectt-1000'>filp</span>
 </code>. You’ll also see it referred to as a struct file object. Resist the temptation.
 </p><!-- l. 1006 --><p class='indent'>   Go ahead and look at the definition of file. Most of the entries you see, like struct
-dentry are not used by device drivers, and you can ignore them. This is because
+dentry, are not used by device drivers, and you can ignore them. This is because
 drivers do not fill file directly; they only use structures contained in file which are
 created elsewhere.
 </p><!-- l. 1010 --><p class='noindent'>
@@ -1839,7 +1838,7 @@ hand, the internal interfaces within the kernel can and do change between
 versions.
 </p><!-- l. 1134 --><p class='indent'>   There are differences between different kernel versions, and if you want
 to support multiple kernel versions, you will find yourself having to code
-conditional compilation directives. The way to do this to compare the macro
+conditional compilation directives. The way to do this is to compare the macro
 <code> <span class='ectt-1000'>LINUX_VERSION_CODE</span>
 </code> to the macro <code>  <span class='ectt-1000'>KERNEL_VERSION</span>
 </code>. In version <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>a.b.c</span></span></span> of the kernel, the value of this macro would be <img alt='216a+ 28b+ c  ' class='math' src='lkmpg-for-ht0x.svg' />.
@@ -1874,7 +1873,7 @@ us to put <code>  <span class='ectt-1000'>try_module_get</span>
 </code> and <code>  <span class='ectt-1000'>module_put</span>
 </code> in this module, and if the file is opened and then the module is removed, there’s no
 way to avoid the consequences.
-</p><!-- l. 1151 --><p class='indent'>   Here a simple example showing how to use a <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/proc</span></span></span> file. This is the HelloWorld for
+</p><!-- l. 1151 --><p class='indent'>   Here is a simple example showing how to use a <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/proc</span></span></span> file. This is the HelloWorld for
 the <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/proc</span></span></span> filesystem. There are three parts: create the file <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/proc/helloworld</span></span></span> in the
 function <code>  <span class='ectt-1000'>init_module</span>
 </code>, return a value (and a buffer) when the file <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/proc/helloworld</span></span></span> is read in the callback
@@ -2476,7 +2475,7 @@ under the <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/
 <!-- l. 1294 --><p class='indent'>   Attributes can be exported for kobjects in the form of regular files in the
 filesystem. Sysfs forwards file I/O operations to methods defined for the attributes,
 providing a means to read and write kernel attributes.
-</p><!-- l. 1297 --><p class='indent'>   An attribute definition in simply:
+</p><!-- l. 1297 --><p class='indent'>   A simple attribute definition:
 </p><!-- l. 1 --><p class='indent'>
 </p>
    <pre class='fancyvrb' id='fancyvrb52'><a id='x1-38013r1'></a><span class='ecrm-0500'>1</span><span id='textcolor954'><span class='ectt-0800'>struct</span></span><span class='ectt-0800'> attribute {</span> 
@@ -2505,7 +2504,7 @@ providing a means to read and write kernel attributes.
 <a id='x1-38054r8'></a><span class='ecrm-0500'>8</span> 
 <a id='x1-38056r9'></a><span class='ecrm-0500'>9</span><span id='textcolor978'><span class='ectt-0800'>int</span></span><span class='ectt-0800'> device_create_file(</span><span id='textcolor979'><span class='ectt-0800'>struct</span></span><span class='ectt-0800'> device *, </span><span id='textcolor980'><span class='ectt-0800'>const</span></span><span class='ectt-0800'> </span><span id='textcolor981'><span class='ectt-0800'>struct</span></span><span class='ectt-0800'> device_attribute *);</span> 
 <a id='x1-38058r10'></a><span class='ecrm-0500'>10</span><span id='textcolor982'><span class='ectt-0800'>void</span></span><span class='ectt-0800'> device_remove_file(</span><span id='textcolor983'><span class='ectt-0800'>struct</span></span><span class='ectt-0800'> device *, </span><span id='textcolor984'><span class='ectt-0800'>const</span></span><span class='ectt-0800'> </span><span id='textcolor985'><span class='ectt-0800'>struct</span></span><span class='ectt-0800'> device_attribute *);</span></pre>
-<!-- l. 1325 --><p class='indent'>   To read or write attributes, <code>  <span class='ectt-1000'>show()</span>
+<!-- l. 1325 --><p class='indent'>   To read or write attributes, the <code>  <span class='ectt-1000'>show()</span>
 </code> or <code>  <span class='ectt-1000'>store()</span>
 </code> method must be specified when declaring the attribute. For the
 common cases <a href='https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/include/linux/sysfs.h'>include/linux/sysfs.h</a> provides convenience macros
@@ -3526,7 +3525,7 @@ more details. In this case, thanks to Kprobes, a hook can be used instead on the
                                                                   
 system call entry to intercept the system call.
 </p><!-- l. 1577 --><p class='indent'>   Note that all the related problems make syscall stealing unfeasible for
-production use. In order to keep people from doing potential harmful things
+production use. In order to keep people from doing potentially harmful things
 <code> <span class='ectt-1000'>sys_call_table</span>
 </code> is no longer exported. This means, if you want to do something more than a mere
 dry run of this example, you will have to patch your current kernel in order to have
@@ -4545,7 +4544,7 @@ kernel source code stating that a function “may sleep”, “might sleep”, o
 more explicitly “the caller should not hold a spinlock”. Those comments are
 hints that a function may implicitly sleep and must not be called in atomic
 contexts.
-</p><!-- l. 1748 --><p class='indent'>   Now, let’s differentiate between a few types of spinlock functions in Linux kernel:
+</p><!-- l. 1748 --><p class='indent'>   Now, let’s differentiate between a few types of spinlock functions in the Linux kernel:
 <code> <span class='ectt-1000'>spin_lock()</span>
 </code>, <code>  <span class='ectt-1000'>spin_lock_irq()</span>
 </code>, <code>  <span class='ectt-1000'>spin_lock_irqsave()</span>
@@ -4745,11 +4744,11 @@ below.
 <a id='x1-49146r73'></a><span class='ecrm-0500'>73</span> 
 <a id='x1-49148r74'></a><span class='ecrm-0500'>74</span><span class='ectt-0800'>MODULE_DESCRIPTION(</span><span id='textcolor2347'><span class='ectt-0800'>"Atomic operations example"</span></span><span class='ectt-0800'>);</span> 
 <a id='x1-49150r75'></a><span class='ecrm-0500'>75</span><span class='ectt-0800'>MODULE_LICENSE(</span><span id='textcolor2348'><span class='ectt-0800'>"GPL"</span></span><span class='ectt-0800'>);</span></pre>
-<!-- l. 1786 --><p class='indent'>   Before the C11 standard adopts the built-in atomic types, the kernel already
+<!-- l. 1786 --><p class='indent'>   Before the C11 standard adopted the built-in atomic types, the kernel already
 provided a small set of atomic types by using a bunch of tricky architecture-specific
 codes. Implementing the atomic types by C11 atomics may allow the kernel to throw
-away the architecture-specific codes and letting the kernel code be more friendly to
-the people who understand the standard. But there are some problems, such as the
+away the architecture-specific codes and make the kernel code be more friendly to the
+people who understand the standard. But there are some problems, such as the
 memory model of the kernel doesn’t match the model formed by the C11 atomics.
 For further details, see: </p>
      <ul class='itemize1'>
@@ -4909,8 +4908,9 @@ Thus, it is better to use a unique prototype to separate from the cluster that t
 </code> is adopted and the kernel step by step converting to
 <code> <span class='ectt-1000'>timer_setup</span>
 </code> from <code>  <span class='ectt-1000'>setup_timer</span>
-</code>. One of the reasons why API was changed is it need to coexist with the old version interface.
-Moreover, the <code>  <span class='ectt-1000'>timer_setup</span>
+</code>. One of the reasons why the API was changed is that it needed
+to coexist with the old version of the interface. Moreover, the
+<code> <span class='ectt-1000'>timer_setup</span>
 </code> was implemented by <code>  <span class='ectt-1000'>setup_timer</span>
 </code> at first. 
 </p>
@@ -5020,10 +5020,10 @@ loaded, starts blinking the keyboard LEDs until it is unloaded.
 there might yet be some other tricks to try. Ever wondered what
 <code> <span class='ectt-1000'>CONFIG_LL_DEBUG</span>
 </code> in <code>  <span class='ectt-1000'>make menuconfig</span>
-</code> is good for? If you activate that you get low level access to the serial port. While this
                                                                   
 
                                                                   
+</code> is good for? If you activate that you get low level access to the serial port. While this
 might not sound very powerful by itself, you can patch <a href='https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/kernel/printk.c'>kernel/printk.c</a> or any other
 essential syscall to print ASCII characters, thus making it possible to trace virtually
 everything what your code does over a serial line. If you find yourself porting the
@@ -5062,10 +5062,10 @@ You can also use <code>  <span class='ectt-1000'>gpio_request_array()</span>
 </code> has been removed since Linux v6.10+.
 </p><!-- l. 1896 --><p class='indent'>   When using GPIO, you must set it as either output with
 <code> <span class='ectt-1000'>gpio_direction_output()</span>
-</code> or input with <code>  <span class='ectt-1000'>gpio_direction_input()</span>
                                                                   
 
                                                                   
+</code> or input with <code>  <span class='ectt-1000'>gpio_direction_input()</span>
 </code>.
 </p>
      <ul class='itemize1'>
@@ -7402,13 +7402,14 @@ avoids flushing the processor pipeline. The opposite happens if you use the
 </p><!-- l. 2253 --><p class='noindent'>
 </p>
    <h4 class='subsectionHead' id='static-keys'><span class='titlemark'>19.2   </span> <a id='x1-7000019.2'></a>Static keys</h4>
-<!-- l. 2255 --><p class='noindent'>Static keys allow us to enable or disable kernel code paths based on the runtime state
-of key. Its APIs have been available since 2010 (most architectures are already
-supported), use self-modifying code to eliminate the overhead of cache and branch
-prediction. The most typical use case of static keys is for performance-sensitive kernel
-code, such as tracepoints, context switching, networking, etc. These hot paths of the
-kernel often contain branches and can be optimized easily using this technique.
-Before we can use static keys in the kernel, we need to make sure that gcc supports
+<!-- l. 2255 --><p class='noindent'>Static keys allow us to enable or disable kernel code paths based on the
+runtime state of a key. Their APIs have been available since 2010 (most
+architectures are already supported) and use self-modifying code to eliminate
+the overhead of cache and branch prediction. The most typical use case of
+static keys is for performance-sensitive kernel code, such as tracepoints,
+context switching, networking, etc. These hot paths of the kernel often contain
+branches and can be optimized easily using this technique. Before we can
+use static keys in the kernel, we need to make sure that gcc supports
 <code> <span id='textcolor3959'><span class='ectt-1000'>asm</span></span><span class='ectt-1000'> </span><span id='textcolor3960'><span class='ectt-1000'>goto</span></span>
 </code> inline assembly, and the following kernel configurations are set:
 </p><!-- l. 1 --><p class='indent'>
@@ -7416,7 +7417,7 @@ Before we can use static keys in the kernel, we need to make sure that gcc suppo
    <pre class='fancyvrb' id='fancyvrb106'><a id='x1-70006r1'></a><span class='ecrm-0500'>1</span><span class='ectt-0800'>CONFIG_JUMP_LABEL=y</span> 
 <a id='x1-70008r2'></a><span class='ecrm-0500'>2</span><span class='ectt-0800'>CONFIG_HAVE_ARCH_JUMP_LABEL=y</span> 
 <a id='x1-70010r3'></a><span class='ecrm-0500'>3</span><span class='ectt-0800'>CONFIG_HAVE_ARCH_JUMP_LABEL_RELATIVE=y</span></pre>
-<!-- l. 2265 --><p class='indent'>   To declare a static key, we need to define a global variable using the
+<!-- l. 2266 --><p class='indent'>   To declare a static key, we need to define a global variable using the
 <code> <span class='ectt-1000'>DEFINE_STATIC_KEY_FALSE</span>
 </code> or <code>  <span class='ectt-1000'>DEFINE_STATIC_KEY_TRUE</span>
 </code> macro defined in <a href='https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/include/linux/jump_label.h'>include/linux/jump_label.h</a>. This macro initializes the key with
@@ -7426,7 +7427,7 @@ code:
 </p><!-- l. 1 --><p class='indent'>
 </p>
    <pre class='fancyvrb' id='fancyvrb107'><a id='x1-70015r1'></a><span class='ecrm-0500'>1</span><span class='ectt-0800'>DEFINE_STATIC_KEY_FALSE(fkey);</span></pre>
-<!-- l. 2272 --><p class='indent'>   Once the static key has been declared, we need to add branching code to the
+<!-- l. 2273 --><p class='indent'>   Once the static key has been declared, we need to add branching code to the
 module that uses the static key. For example, the code includes a fastpath, where a
 no-op instruction will be generated at compile time as the key is initialized to false
 and the branch is unlikely to be taken.
@@ -7439,12 +7440,12 @@ and the branch is unlikely to be taken.
                                                                   
 
                                                                   
-<!-- l. 2282 --><p class='indent'>   If the key is enabled at runtime by calling
+<!-- l. 2283 --><p class='indent'>   If the key is enabled at runtime by calling
 <code> <span class='ectt-1000'>static_branch_enable(&amp;fkey)</span>
 </code>, the fastpath will be patched with an unconditional jump instruction to the slowpath
 code <code>  <span class='ectt-1000'>pr_alert</span>
 </code>, so the branch will always be taken until the key is disabled again.
-</p><!-- l. 2284 --><p class='indent'>   The following kernel module derived from <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>chardev.c</span></span></span>, demonstrates how the
+</p><!-- l. 2285 --><p class='indent'>   The following kernel module derived from <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>chardev.c</span></span></span>, demonstrates how the
 static key works.
 </p><!-- l. 1 --><p class='indent'>
 </p>
@@ -7642,57 +7643,57 @@ static key works.
 <a id='x1-70413r192'></a><span class='ecrm-0500'>192</span><span class='ectt-0800'>module_exit(chardev_exit);</span> 
 <a id='x1-70415r193'></a><span class='ecrm-0500'>193</span> 
 <a id='x1-70417r194'></a><span class='ecrm-0500'>194</span><span class='ectt-0800'>MODULE_LICENSE(</span><span id='textcolor4153'><span class='ectt-0800'>"GPL"</span></span><span class='ectt-0800'>);</span></pre>
-<!-- l. 2288 --><p class='indent'>   To check the state of the static key, we can use the <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/dev/key_state</span></span></span>
+<!-- l. 2289 --><p class='indent'>   To check the state of the static key, we can use the <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/dev/key_state</span></span></span>
 interface.
 </p><!-- l. 1 --><p class='indent'>
 </p>
    <pre class='fancyvrb' id='fancyvrb110'><a id='x1-70420r1'></a><span class='ecrm-0500'>1</span><span class='ectt-1000'>cat /dev/key_state</span></pre>
-<!-- l. 2294 --><p class='indent'>   This will display the current state of the key, which is disabled by default.
-</p><!-- l. 2296 --><p class='indent'>   To change the state of the static key, we can perform a write operation on the
+<!-- l. 2295 --><p class='indent'>   This will display the current state of the key, which is disabled by default.
+</p><!-- l. 2297 --><p class='indent'>   To change the state of the static key, we can perform a write operation on the
 file:
 </p><!-- l. 1 --><p class='indent'>
 </p>
    <pre class='fancyvrb' id='fancyvrb111'><a id='x1-70423r1'></a><span class='ecrm-0500'>1</span><span class='ectt-1000'>echo enable &gt; /dev/key_state</span></pre>
-<!-- l. 2302 --><p class='indent'>   This will enable the static key, causing the code path to switch from the fastpath
+<!-- l. 2303 --><p class='indent'>   This will enable the static key, causing the code path to switch from the fastpath
 to the slowpath.
-</p><!-- l. 2304 --><p class='indent'>   In some cases, the key is enabled or disabled at initialization and never changed,
+</p><!-- l. 2305 --><p class='indent'>   In some cases, the key is enabled or disabled at initialization and never changed,
 we can declare a static key as read-only, which means that it can only be toggled in
 the module init function. To declare a read-only static key, we can use the
 <code> <span class='ectt-1000'>DEFINE_STATIC_KEY_FALSE_RO</span>
 </code> or <code>  <span class='ectt-1000'>DEFINE_STATIC_KEY_TRUE_RO</span>
 </code> macro instead. Attempts to change the key at runtime will result in a page fault. For
 more information, see <a href='https://www.kernel.org/doc/Documentation/static-keys.txt'>Static keys</a>
-</p><!-- l. 2307 --><p class='noindent'>
+</p><!-- l. 2308 --><p class='noindent'>
 </p>
    <h3 class='sectionHead' id='common-pitfalls'><span class='titlemark'>20   </span> <a id='x1-7100020'></a>Common Pitfalls</h3>
-<!-- l. 2310 --><p class='noindent'>
+<!-- l. 2311 --><p class='noindent'>
 </p>
                                                                   
 
                                                                   
    <h4 class='subsectionHead' id='using-standard-libraries'><span class='titlemark'>20.1   </span> <a id='x1-7200020.1'></a>Using standard libraries</h4>
-<!-- l. 2312 --><p class='noindent'>You can not do that. In a kernel module, you can only use kernel functions which are
+<!-- l. 2313 --><p class='noindent'>You can not do that. In a kernel module, you can only use kernel functions which are
 the functions you can see in <span class='obeylines-h'><span class='verb'><span class='ectt-1000'>/proc/kallsyms</span></span></span>.
-</p><!-- l. 2315 --><p class='noindent'>
+</p><!-- l. 2316 --><p class='noindent'>
 </p>
    <h4 class='subsectionHead' id='disabling-interrupts'><span class='titlemark'>20.2   </span> <a id='x1-7300020.2'></a>Disabling interrupts</h4>
-<!-- l. 2317 --><p class='noindent'>You might need to do this for a short time and that is OK, but if you do not enable
+<!-- l. 2318 --><p class='noindent'>You might need to do this for a short time and that is OK, but if you do not enable
 them afterwards, your system will be stuck and you will have to power it
 off.
-</p><!-- l. 2319 --><p class='noindent'>
+</p><!-- l. 2320 --><p class='noindent'>
 </p>
    <h3 class='sectionHead' id='where-to-go-from-here'><span class='titlemark'>21   </span> <a id='x1-7400021'></a>Where To Go From Here?</h3>
-<!-- l. 2321 --><p class='noindent'>For those deeply interested in kernel programming, <a href='https://kernelnewbies.org'>kernelnewbies.org</a> and the
+<!-- l. 2322 --><p class='noindent'>For those deeply interested in kernel programming, <a href='https://kernelnewbies.org'>kernelnewbies.org</a> and the
 <a href='https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation'>Documentation</a> subdirectory within the kernel source code are highly recommended.
 Although the latter may not always be straightforward, it serves as a valuable initial
 step for further exploration. Echoing Linus Torvalds’ perspective, the most effective
 method to understand the kernel is through personal examination of the source
 code.
-</p><!-- l. 2326 --><p class='indent'>   Contributions to this guide are welcome, especially if there are any significant
+</p><!-- l. 2327 --><p class='indent'>   Contributions to this guide are welcome, especially if there are any significant
 inaccuracies identified. To contribute or report an issue, please initiate an
 issue at <a class='url' href='https://github.com/sysprog21/lkmpg'><span class='ectt-1000'>https://github.com/sysprog21/lkmpg</span></a>. Pull requests are greatly
 appreciated.
-</p><!-- l. 2330 --><p class='indent'>   Happy hacking!
+</p><!-- l. 2331 --><p class='indent'>   Happy hacking!
 </p>
    <div class='footnotes'><!-- l. 2005 --><p class='indent'>     <span class='footnote-mark'><a href='#fn1x0-bk' id='fn1x0'><sup class='textsuperscript'>1</sup></a></span><span class='ecrm-0800'>The goal of threaded interrupts is to push more of the work to separate threads, so that the
 </span><span class='ecrm-0800'>minimum needed for acknowledging an interrupt is reduced, and therefore the time spent handling
