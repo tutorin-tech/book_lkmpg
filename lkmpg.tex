@@ -1259,23 +1259,20 @@ As the buffer (in read or write function) is in kernel space, for write function
 
 \samplec{examples/procfs2.c}
 
-\subsection{Manage /proc file with standard filesystem}
+\subsection{Manage /proc file metadata and access hooks}
 \label{sec:manage_procfs}
 We have seen how to read and write a \verb|/proc| file with the \verb|/proc| interface.
-But it is also possible to manage \verb|/proc| file with inodes.
-The main concern is to use advanced functions, like permissions.
+The \verb|proc_create| helper also lets us control metadata and add extra hooks, such as explicit \cpp|open| and \cpp|release| handlers.
+That is useful when we want more control than a minimal read/write example provides.
 
-In Linux, there is a standard mechanism for filesystem registration.
-Since every filesystem has to have its own functions to handle inode and file operations, there is a special structure to hold pointers to all those functions, \cpp|struct inode_operations|, which includes a pointer to \cpp|struct proc_ops|.
+The sample in this section keeps the same read and write callbacks as before, but adds \cpp|procfs_open| and \cpp|procfs_close| to show where setup and teardown logic can live.
+This is also where you would normally attach per-open state if the file needed it.
 
-The difference between file and inode operations is that file operations deal with the file itself whereas inode operations deal with ways of referencing the file, such as creating links to it.
+Permissions are still important, but in this example they are controlled through the proc entry itself.
+The mode argument passed to \cpp|proc_create| sets the access bits, and \cpp|proc_set_user| adjusts the owner and group of the \verb|/proc| entry.
 
-In \verb|/proc|, whenever we register a new file, we're allowed to specify which \cpp|struct inode_operations| will be used to access to it.
-This is the mechanism we use, a \cpp|struct inode_operations| which includes a pointer to a \cpp|struct proc_ops| which includes pointers to our \cpp|procfs_read| and \cpp|procfs_write| functions.
-
-Another interesting point here is the \cpp|module_permission| function.
-This function is called whenever a process tries to do something with the \verb|/proc| file, and it can decide whether to allow access or not.
-Right now it is only based on the operation and the uid of the current user (as available in current, a pointer to a structure which includes information on the currently running process), but it could be based on anything we like, such as what other processes are doing with the same file, the time of day, or the last input we received.
+Another helper used here is \cpp|proc_set_size|, which records the expected size of the virtual file.
+That information is optional, but it can improve the way user space tools report the entry.
 
 It is important to note that the standard roles of read and write are reversed in the kernel.
 Read functions are used for output, whereas write functions are used for input.
