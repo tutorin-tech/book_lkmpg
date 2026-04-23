@@ -6,31 +6,105 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: build-deploy-assets-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: twtug/lkmpg
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: |
-          make all
-          make html
-          tar zcvf lkmpg-html.tar.gz ./html
-      - name: Delete old release
-        uses: cb80/delrel@latest
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Cache TeX intermediates
+        uses: actions/cache@v5
         with:
-          tag: latest
-      - name: Tag
+          path: |
+            lkmpg.aux
+            lkmpg.fdb_latexmk
+            lkmpg.fls
+            lkmpg.out
+            lkmpg-for-ht.tmp
+          key: docs-build-${{ runner.os }}-${{ hashFiles('lkmpg.tex', 'Makefile', 'html.cfg', 'lib/**/*.tex', 'examples/**/*', 'assets/**/*') }}
+      - name: Build PDF and HTML
         run: |
-          git tag latest
-          git push -f --tags
-      - name: Release
-        uses: softprops/action-gh-release@v2
+          make all 2>&1 | tee build-pdf.log
+          make html 2>&1 | tee build-html.log
+          tar zcvf lkmpg-html.tar.gz ./html
+      - name: Upload release payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: |
+            lkmpg.pdf
+            lkmpg-html.tar.gz
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: html-site
+          path: html
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-build-logs
+          path: |
+            build-pdf.log
+            build-html.log
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download release payload
+        uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+      - name: Update latest tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa latest -m "Latest generated assets"
+          git push origin refs/tags/latest --force
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             lkmpg.pdf
             lkmpg-html.tar.gz
           tag_name: "latest"
           prerelease: true
+          overwrite_files: true
+
+  deploy-pages:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download HTML artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: html-site
+          path: html
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: html
+          publish_branch: gh-pages
