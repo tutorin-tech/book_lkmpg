@@ -17,7 +17,37 @@ count_matches()
     grep -E -c "${pattern}" "${file}" 2>/dev/null || true
 }
 
-update_repo()
+needs_rebuild()
+{
+    local repo_url=$1
+    local repo_dir=$2
+    local binary=$3
+    local stamp_file=$4
+
+    if [ ! -x "${binary}" ] || ! "${binary}" --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [ ! -d "${repo_dir}/.git" ]; then
+        return 0
+    fi
+
+    local remote_head local_head
+    remote_head=$(git ls-remote "${repo_url}" HEAD 2>/dev/null | cut -f1)
+    local_head=$(git -C "${repo_dir}" rev-parse HEAD 2>/dev/null)
+
+    if [ -z "${remote_head}" ] || [ -z "${local_head}" ]; then
+        return 0
+    fi
+
+    if [ ! -f "${stamp_file}" ] || [ "$(cat "${stamp_file}")" != "${local_head}" ]; then
+        return 0
+    fi
+
+    [ "${remote_head}" != "${local_head}" ]
+}
+
+sync_repo()
 {
     local repo_url=$1
     local repo_dir=$2
@@ -63,16 +93,20 @@ do_cppcheck()
 
 do_sparse()
 {
+    local sparse_url="https://git.kernel.org/pub/scm/devel/sparse/sparse.git"
     local sparse_dir="${TOOL_CACHE_DIR}/sparse"
     local sparse_log="${LOG_DIR}/sparse.log"
-    local sparse_bin
+    local sparse_bin="${sparse_dir}/sparse"
+    local sparse_stamp="${sparse_dir}/.build-head"
     local warning_count
     local error_count
     local count
 
-    update_repo "https://git.kernel.org/pub/scm/devel/sparse/sparse.git" "${sparse_dir}"
-    make -C "${sparse_dir}" sparse
-    sparse_bin="${sparse_dir}/sparse"
+    if needs_rebuild "${sparse_url}" "${sparse_dir}" "${sparse_bin}" "${sparse_stamp}"; then
+        sync_repo "${sparse_url}" "${sparse_dir}"
+        make -C "${sparse_dir}" HAVE_LLVM=no sparse
+        git -C "${sparse_dir}" rev-parse HEAD > "${sparse_stamp}"
+    fi
 
     make -C examples clean >/dev/null 2>&1 || true
     if ! make -C examples C=2 CHECK="${sparse_bin}" 2> "${sparse_log}"; then
@@ -126,16 +160,20 @@ do_gcc()
 
 do_smatch()
 {
+    local smatch_url="https://github.com/error27/smatch.git"
     local smatch_dir="${TOOL_CACHE_DIR}/smatch"
     local smatch_log="${LOG_DIR}/smatch.log"
-    local smatch_bin
+    local smatch_bin="${smatch_dir}/smatch"
+    local smatch_stamp="${smatch_dir}/.build-head"
     local warning_count
     local error_count
     local count
 
-    update_repo "https://github.com/error27/smatch.git" "${smatch_dir}"
-    make -C "${smatch_dir}" smatch
-    smatch_bin="${smatch_dir}/smatch"
+    if needs_rebuild "${smatch_url}" "${smatch_dir}" "${smatch_bin}" "${smatch_stamp}"; then
+        sync_repo "${smatch_url}" "${smatch_dir}"
+        make -C "${smatch_dir}" smatch
+        git -C "${smatch_dir}" rev-parse HEAD > "${smatch_stamp}"
+    fi
 
     make -C examples clean >/dev/null 2>&1 || true
     if ! make -C examples C=2 CHECK="${smatch_bin} -p=kernel" > "${smatch_log}" \
