@@ -1,21 +1,35 @@
 #!/usr/bin/env bash
 
-SOURCES=$(find $(git rev-parse --show-toplevel) | grep -E "\.(cpp|cc|c|h)\$")
+set -euo pipefail
 
-CLANG_FORMAT=$(which clang-format)
-if [ $? -ne 0 ]; then
-    CLANG_FORMAT=$(which clang-format)
-    if [ $? -ne 0 ]; then
-        echo "[!] clang-format not installed. Unable to check source file format policy." >&2
-        exit 1
-    fi
+mapfile -t SOURCES < <(git ls-files '*.c' '*.cc' '*.cpp' '*.h')
+if [ ${#SOURCES[@]} -eq 0 ]; then
+    exit 0
 fi
 
-set -x
+CLANG_FORMAT=$(command -v clang-format)
+if [ -z "${CLANG_FORMAT}" ]; then
+    echo "[!] clang-format not installed. Unable to check source file format policy." >&2
+    exit 1
+fi
 
-for file in ${SOURCES};
-do
-    $CLANG_FORMAT ${file} > expected-format
-    diff -u -p --label="${file}" --label="expected coding style" ${file} expected-format
+LOG_DIR=${STATUS_CHECK_LOG_DIR:-$(pwd)}
+mkdir -p "${LOG_DIR}"
+DIFF_LOG="${LOG_DIR}/check-format.diff"
+TMP_FILE=$(mktemp)
+trap 'rm -f "${TMP_FILE}"' EXIT
+
+: > "${DIFF_LOG}"
+
+for file in "${SOURCES[@]}"; do
+    "${CLANG_FORMAT}" "${file}" > "${TMP_FILE}"
+    if ! diff -u -p --label="${file}" --label="expected coding style" \
+        "${file}" "${TMP_FILE}" >> "${DIFF_LOG}"; then
+        cat "${DIFF_LOG}"
+        exit 1
+    fi
 done
-exit $($CLANG_FORMAT --output-replacements-xml ${SOURCES} | grep -E -c "</replacement>")
+
+if "${CLANG_FORMAT}" --output-replacements-xml "${SOURCES[@]}" | grep -Eq "</replacement>"; then
+    exit 1
+fi

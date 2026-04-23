@@ -8,24 +8,152 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: status-checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  detect-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      examples_changed: ${{ steps.changed-files.outputs.any_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Detect changed example files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            examples/**
+            .ci/**
+
+  lint:
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' ||
+            needs.detect-changes.outputs.examples_changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Check newline endings
+            packages: file
+            command: .ci/check-newline.sh
+            artifact_name: newline-logs
+          - name: Check source formatting
+            packages: clang-format
+            command: .ci/check-format.sh
+            artifact_name: format-logs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.packages }}
+      - name: ${{ matrix.name }}
+        env:
+          STATUS_CHECK_LOG_DIR: ${{ runner.temp }}/status-check-logs
+        run: ${{ matrix.command }}
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ runner.temp }}/status-check-logs
+          if-no-files-found: ignore
+
+  static-analysis:
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' ||
+            needs.detect-changes.outputs.examples_changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bison cppcheck flex gcc git libsqlite3-dev
+      - name: Restore static-analysis tools cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.status-check-tools
+          key: static-analysis-tools-${{ runner.os }}-${{ hashFiles('.ci/static-analysis.sh') }}
+      - name: Run static analysis
+        env:
+          STATUS_CHECK_LOG_DIR: ${{ runner.temp }}/status-check-logs
+          STATUS_CHECK_TOOL_CACHE_DIR: ${{ github.workspace }}/.status-check-tools
+        run: .ci/static-analysis.sh
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: static-analysis-logs
+          path: ${{ runner.temp }}/status-check-logs
+          if-no-files-found: ignore
+
+  build-and-run:
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' ||
+            needs.detect-changes.outputs.examples_changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Build and load modules
+        env:
+          STATUS_CHECK_LOG_DIR: ${{ runner.temp }}/status-check-logs
+        run: .ci/build-n-run.sh
+      - name: Collect kernel diagnostics
+        if: failure()
+        run: |
+          sudo dmesg --color=never | tail -n 200 > "${RUNNER_TEMP}/status-check-logs/dmesg.log" || true
+          find examples -maxdepth 1 -name '*.ko' -print > "${RUNNER_TEMP}/status-check-logs/modules.txt" || true
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-and-run-logs
+          path: ${{ runner.temp }}/status-check-logs
+          if-no-files-found: ignore
+
   validate:
+    needs:
+      - detect-changes
+      - lint
+      - static-analysis
+      - build-and-run
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
-      - name: checkout code
-        uses: actions/checkout@v4
-      - name: Test changed source files
-        id: changed-files
-        uses: tj-actions/changed-files@v45
-        with:
-          files: examples/**
-      - name: validate coding style and functionality
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
-                github.event_name == 'workflow_dispatch' }}
+      - name: Check job results
         run: |
-            sudo apt install -q -y clang-format cppcheck gcc libsqlite3-dev
-            .ci/check-newline.sh
-            .ci/check-format.sh
-            .ci/static-analysis.sh
-            .ci/build-n-run.sh
-        shell: bash
+          result_detect="${{ needs.detect-changes.result }}"
+          result_lint="${{ needs.lint.result }}"
+          result_sa="${{ needs.static-analysis.result }}"
+          result_bar="${{ needs.build-and-run.result }}"
+          changed="${{ needs.detect-changes.outputs.examples_changed }}"
+
+          if [[ "${result_detect}" != "success" ]]; then
+            echo "Change-detection job did not succeed: ${result_detect}"
+            exit 1
+          fi
+
+          # When examples changed (or manual dispatch), jobs must succeed
+          if [[ "${changed}" == "true" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            for r in "${result_lint}" "${result_sa}" "${result_bar}"; do
+              if [[ "${r}" != "success" ]]; then
+                echo "Required job did not succeed: ${r}"
+                exit 1
+              fi
+            done
+          fi

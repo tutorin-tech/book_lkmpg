@@ -1,28 +1,56 @@
 #!/usr/bin/env bash
 
-function build_example()
-{   
-    make -C examples || exit 1
+set -euo pipefail
+
+LOG_DIR=${STATUS_CHECK_LOG_DIR:-$(pwd)}
+mkdir -p "${LOG_DIR}"
+
+build_example()
+{
+    make -C examples 2>&1 | tee "${LOG_DIR}/build-n-run-build.log"
 }
 
-function list_mod()
+list_mod()
 {
-    # Filter out the modules specified in non-working
-    ls examples/*.ko | awk -F "[/|.]" '{print $2}' | grep -vFxf .ci/non-working
+    local exclude_file=".ci/non-working"
+
+    if [ ! -f "${exclude_file}" ]; then
+        exclude_file="/dev/null"
+    fi
+
+    find examples -maxdepth 1 -name '*.ko' -print | sort \
+        | sed 's#^examples/##; s#\.ko$##' \
+        | { grep -vFxf "${exclude_file}" || test $? -eq 1; }
 }
 
-function run_mod()
+run_mod()
 {
-    # insert/remove twice to ensure resource allocations
-    ( sudo insmod "examples/$1.ko" && sudo rmmod "$1" ) || exit 1
-    ( sudo insmod "examples/$1.ko" && sudo rmmod "$1" ) || exit 1
+    local module=$1
+    local module_log="${LOG_DIR}/${module}.log"
+
+    {
+        echo "=== insmod/rmmod pass 1: ${module} ==="
+        sudo insmod "examples/${module}.ko"
+        sudo rmmod "${module}"
+        echo "=== insmod/rmmod pass 2: ${module} ==="
+        sudo insmod "examples/${module}.ko"
+        sudo rmmod "${module}"
+    } 2>&1 | tee "${module_log}"
 }
 
-function run_examples()
+run_examples()
 {
-    for module in $(list_mod); do
-        echo "Running $module"
-        run_mod "$module"
+    local modules=()
+
+    mapfile -t modules < <(list_mod)
+    if [ ${#modules[@]} -eq 0 ]; then
+        echo "No runnable modules found."
+        return
+    fi
+
+    for module in "${modules[@]}"; do
+        echo "Running ${module}"
+        run_mod "${module}"
     done
 }
 
