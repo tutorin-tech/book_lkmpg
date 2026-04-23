@@ -585,6 +585,38 @@ It takes two parameters: a variable name and a free form string describing that 
 
 \samplec{examples/hello-5.c}
 
+If you need to validate a parameter or react whenever it changes, use \cpp|module_param_cb()|.
+This variant takes four arguments: the parameter name, a pointer to a \cpp|struct kernel_param_ops|,
+an argument pointer (typically the address of the backing variable), and the sysfs permissions.
+The callbacks stored in \cpp|struct kernel_param_ops| let you override the \cpp|set| and \cpp|get|
+operations instead of relying on the default helpers such as \cpp|param_set_int()| and \cpp|param_get_int()|.
+With non-zero permissions, the parameter is also exposed through sysfs so the same callbacks can run after the module has already been loaded.
+
+\begin{code}
+static int watched = 42;
+
+static int watched_set(const char *val, const struct kernel_param *kp)
+{
+    int ret = param_set_int(val, kp);
+
+    if (ret)
+        return ret;
+
+    pr_info("watched updated to %d\n", watched);
+    return 0;
+}
+
+static const struct kernel_param_ops watched_ops = {
+    .set = watched_set,
+    .get = param_get_int,
+};
+
+module_param_cb(watched, &watched_ops, &watched, 0644);
+\end{code}
+
+The full example below also overrides \cpp|.get| so that every sysfs read is logged:
+\samplec{examples/hello-6.c}
+
 It is recommended to experiment with the following code:
 \begin{verbatim}
 $ sudo insmod hello-5.ko mystring="bebop" myintarray=-1
@@ -611,12 +643,30 @@ myintarray[0] = -1
 myintarray[1] = -1
 got 2 arguments for myintarray.
 
-$ sudo rmmod hello_5
+$ sudo rmmod hello-5
 $ sudo dmesg -t | tail -1
 Goodbye, world 5
 
 $ sudo insmod hello-5.ko mylong=hello
 insmod: ERROR: could not insert module hello-5.ko: Invalid parameters
+
+$ sudo insmod hello-6.ko watched=7
+$ sudo dmesg -t | tail -3
+watched updated to 7
+Hello, world 6
+watched starts at 7
+
+$ cat /sys/module/hello_6/parameters/watched
+7
+$ sudo dmesg -t | tail -1
+watched was read
+
+$ echo 21 | sudo tee /sys/module/hello_6/parameters/watched
+21
+$ sudo dmesg -t | tail -1
+watched updated to 21
+
+$ sudo rmmod hello-6
 \end{verbatim}
 
 \subsection{Modules Spanning Multiple Files}
@@ -637,6 +687,7 @@ obj-m += hello-2.o
 obj-m += hello-3.o
 obj-m += hello-4.o
 obj-m += hello-5.o
+obj-m += hello-6.o
 obj-m += startstop.o
 startstop-objs := start.o stop.o
 
