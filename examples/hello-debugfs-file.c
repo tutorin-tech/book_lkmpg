@@ -7,7 +7,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/printk.h>
-#include <linux/string.h>
 #include <linux/uaccess.h>
 
 MODULE_DESCRIPTION("Custom debugfs file and blob examples");
