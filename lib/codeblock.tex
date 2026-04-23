@@ -1,3 +1,76 @@
+\ifdefined\HCode
+\RecustomVerbatimEnvironment{Verbatim}{Verbatim}{
+  frame=single,
+  framesep=2mm,
+  baselinestretch=1,
+  fontsize=\footnotesize,
+  breaklines=true,
+  numbers=left
+}
+
+\DefineVerbatimEnvironment{code}{Verbatim}{
+  frame=single,
+  framesep=2mm,
+  baselinestretch=1,
+  fontsize=\footnotesize,
+  breaklines=true,
+  numbers=left
+}
+
+\DefineVerbatimEnvironment{codebash}{Verbatim}{
+  frame=single,
+  framesep=2mm,
+  baselinestretch=1.2,
+  fontsize=\footnotesize,
+  breaklines=true,
+  numbers=left
+}
+
+\NewDocumentCommand{\samplec}{oom}{%
+  \IfNoValueTF{#1}%
+  {%
+    \VerbatimInput[
+      frame=single,
+      framesep=2mm,
+      baselinestretch=1,
+      fontsize=\footnotesize,
+      breaklines=true,
+      numbers=left
+    ]{#3}%
+  }%
+  {%
+    \IfNoValueTF{#2}%
+    {%
+      \VerbatimInput[
+        frame=single,
+        framesep=2mm,
+        baselinestretch=1,
+        fontsize=\footnotesize,
+        breaklines=true,
+        firstline=#1,
+        numbers=left
+      ]{#3}%
+    }%
+    {%
+      \VerbatimInput[
+        frame=single,
+        framesep=2mm,
+        baselinestretch=1,
+        fontsize=\footnotesize,
+        breaklines=true,
+        firstline=#1,
+        lastline=#2,
+        numbers=left
+      ]{#3}%
+    }%
+  }%
+}
+
+\NewDocumentCommand{\sh}{v}{\texttt{#1}}
+\NewDocumentCommand{\cpp}{v}{\texttt{#1}}
+
+\else
+
 \newminted[code]{c}{frame=single,
   framesep=2mm,
   baselinestretch=1,
@@ -35,3 +108,5 @@
 
 \newmintinline[sh]{bash}{}
 \newmintinline[cpp]{c}{}
+
+\fi
