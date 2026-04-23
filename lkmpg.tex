@@ -1821,10 +1821,13 @@ However, this is problematic for real-time Linux because spinlocks in this confi
 This can prevent other tasks from running and cause the system to become unresponsive.
 To address this in real-time Linux environments, a \cpp|raw_spin_lock()| is used, which behaves similarly to a \cpp|spin_lock()| but without causing the system to sleep.
 
-On the other hand, \cpp|spin_lock_irq()| disables interrupts while holding the lock, but it does not save the interrupt state.
-This means that if an interrupt occurs while the lock is held, the interrupt state could be lost.
-In contrast, \cpp|spin_lock_irqsave()| disables interrupts and also saves the interrupt state, ensuring that interrupts are restored to their previous state when the lock is released.
-This makes \cpp|spin_lock_irqsave()| a safer option in scenarios where preserving the interrupt state is crucial.
+On non-\verb|PREEMPT_RT| kernels, \cpp|spin_lock_irq()| disables local hard interrupts before acquiring the lock, and \cpp|spin_unlock_irq()| unconditionally re-enables them when the lock is released.
+Because this pair does not save the previous interrupt state, use it only when you know hard interrupts are enabled on entry and it is correct to re-enable them on exit.
+In contrast, \cpp|spin_lock_irqsave()| disables local hard interrupts and stores the previous state in an opaque \cpp|unsigned long flags| variable.
+The matching \cpp|spin_unlock_irqrestore()| restores that saved state, so it is safe regardless of whether hard interrupts were enabled or disabled before entering the critical section.
+This makes \cpp|spin_lock_irqsave()| the preferred interface when a function may be called from both process context and hardirq context, or from any path where the caller's interrupt state is unknown.
+On \verb|PREEMPT_RT| kernels, \cpp|spinlock_t| becomes an RT-mutex-based sleeping lock, so the \cpp|_irq| and \cpp|_irqsave| suffixes do not actually disable hardware interrupts.
+If you genuinely need hard interrupts disabled, use the \cpp|raw_spin_lock_irqsave()| family (see \cpp|raw_spin_lock()| above), but note that raw spinlocks really spin, disable preemption, and must not be held across any potentially sleeping operation.
 
 Next, \cpp|spin_lock_bh()| disables \textbf{softirqs} (software interrupts) but allows hardware interrupts to continue.
 Unlike \cpp|spin_lock_irq()| and \cpp|spin_lock_irqsave()|, which disable both hardware and software interrupts, \cpp|spin_lock_bh()| is useful when hardware interrupts need to remain active.
