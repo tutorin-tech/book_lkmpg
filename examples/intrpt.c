@@ -144,7 +144,7 @@ static int __init intrpt_init(void)
     if (ret < 0) {
         pr_err("Unable to request IRQ: %d\n", ret);
 #ifdef NO_GPIO_REQUEST_ARRAY
-        goto fail3;
+        goto fail4;
 #else
         goto fail2;
 #endif

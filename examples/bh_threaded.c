@@ -77,7 +77,7 @@ static int __init bottomhalf_init(void)
 
     if (ret) {
         pr_err("Unable to configure LED GPIO direction: %d\n", ret);
-        goto fail1;
+        goto fail2;
     }
 #endif
 
@@ -87,21 +87,21 @@ static int __init bottomhalf_init(void)
 
     if (ret) {
         pr_err("Unable to request GPIOs for BUTTONs: %d\n", ret);
-        goto fail1;
+        goto fail2;
     }
 
     ret = gpio_request(button_gpios[1], "LED 1 OFF BUTTON");
 
     if (ret) {
         pr_err("Unable to request GPIOs for BUTTONs: %d\n", ret);
-        goto fail2;
+        goto fail3;
     }
 
     ret = gpio_direction_input(button_gpios[0]);
 
     if (ret) {
         pr_err("Unable to configure BUTTON1 GPIO direction: %d\n", ret);
-        goto fail3;
+        goto fail4;
     }
 
     ret = gpio_direction_input(button_gpios[1]);
@@ -169,7 +169,7 @@ static int __init bottomhalf_init(void)
     if (ret < 0) {
         pr_err("Unable to request IRQ: %d\n", ret);
 #ifdef NO_GPIO_REQUEST_ARRAY
-        goto fail4;
+        goto fail5;
 #else
         goto fail2;
 #endif
@@ -212,8 +212,6 @@ fail3:
 
 fail2:
     gpio_free(led_gpio);
-
-fail1:
 #else
 fail3:
     free_irq(button_irqs[0], &buttons[0]);
