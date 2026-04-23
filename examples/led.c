@@ -34,10 +34,16 @@ struct LED_dev {
 static struct LED_dev led_device;
 
 /* Define GPIOs for LEDs.
- * TODO: According to the requirements, search /sys/kernel/debug/gpio to 
+ * TODO: According to the requirements, search /sys/kernel/debug/gpio to
  * find the corresponding GPIO location.
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+static unsigned int led_gpio = 4;
+static unsigned int led_flags = GPIOF_OUT_INIT_LOW;
+static const char *led_label = "LED 1";
+#else
 static struct gpio leds[] = { { 4, GPIOF_OUT_INIT_LOW, "LED 1" } };
+#endif
 
 /* This is called whenever a process attempts to open the device file */
 static int device_open(struct inode *inode, struct file *file)
@@ -62,11 +68,19 @@ static ssize_t device_write(struct file *file, const char __user *buffer,
     /* Determine the received signal to decide the LED on/off state. */
     switch (control_signal[0]) {
     case '0':
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+        gpio_set_value(led_gpio, 0);
+#else
         gpio_set_value(leds[0].gpio, 0);
+#endif
         pr_info("LED OFF");
         break;
     case '1':
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+        gpio_set_value(led_gpio, 1);
+#else
         gpio_set_value(leds[0].gpio, 1);
+#endif
         pr_info("LED ON");
         break;
     default:
@@ -146,24 +160,40 @@ static int __init led_init(void)
 
     pr_info("Device created on /dev/%s\n", DEVICE_NAME);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+    ret = gpio_request(led_gpio, led_label);
+#else
     ret = gpio_request(leds[0].gpio, leds[0].label);
+#endif
 
     if (ret) {
         pr_err("Unable to request GPIOs for LEDs: %d\n", ret);
         goto fail4;
     }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+    ret = gpio_direction_output(led_gpio, led_flags);
+#else
     ret = gpio_direction_output(leds[0].gpio, leds[0].flags);
+#endif
 
     if (ret) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+        pr_err("Failed to set GPIO %d direction\n", led_gpio);
+#else
         pr_err("Failed to set GPIO %d direction\n", leds[0].gpio);
+#endif
         goto fail5;
     }
 
     return 0;
 
 fail5:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+    gpio_free(led_gpio);
+#else
     gpio_free(leds[0].gpio);
+#endif
 
 fail4:
     device_destroy(led_device.cls, led_device.dev_num);
@@ -182,8 +212,13 @@ fail1:
 
 static void __exit led_exit(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+    gpio_set_value(led_gpio, 0);
+    gpio_free(led_gpio);
+#else
     gpio_set_value(leds[0].gpio, 0);
     gpio_free(leds[0].gpio);
+#endif
 
     device_destroy(led_device.cls, led_device.dev_num);
     class_destroy(led_device.cls);
