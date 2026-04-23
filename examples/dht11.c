@@ -33,10 +33,17 @@ struct dht11_dev {
 static struct dht11_dev dht11_device;
 
 /* Define GPIOs for LEDs.
- * TODO: According to the requirements, search /sys/kernel/debug/gpio to 
+ * TODO: According to the requirements, search /sys/kernel/debug/gpio to
  * find the corresponding GPIO location.
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+static unsigned int dht11_gpio_pin = GPIO_PIN_4;
+static const char *dht11_gpio_label = "Signal";
+#else
 static struct gpio dht11[] = { { GPIO_PIN_4, GPIOF_OUT_INIT_HIGH, "Signal" } };
+#define dht11_gpio_pin (dht11[0].gpio)
+#define dht11_gpio_label (dht11[0].label)
+#endif
 
 static int dht11_read_data(void)
 {
@@ -44,29 +51,29 @@ static int dht11_read_data(void)
     uint8_t sensor_data[5] = { 0 };
     uint8_t i, j;
 
-    gpio_set_value(dht11[0].gpio, 0);
+    gpio_set_value(dht11_gpio_pin, 0);
     mdelay(20);
-    gpio_set_value(dht11[0].gpio, 1);
+    gpio_set_value(dht11_gpio_pin, 1);
     udelay(30);
-    gpio_direction_input(dht11[0].gpio);
+    gpio_direction_input(dht11_gpio_pin);
     udelay(2);
 
     timeout = 300;
-    while (gpio_get_value(dht11[0].gpio) && timeout--)
+    while (gpio_get_value(dht11_gpio_pin) && timeout--)
         udelay(1);
 
     if (timeout == -1)
         return -ETIMEDOUT;
 
     timeout = 300;
-    while (!gpio_get_value(dht11[0].gpio) && timeout--)
+    while (!gpio_get_value(dht11_gpio_pin) && timeout--)
         udelay(1);
 
     if (timeout == -1)
         return -ETIMEDOUT;
 
     timeout = 300;
-    while (gpio_get_value(dht11[0].gpio) && timeout--)
+    while (gpio_get_value(dht11_gpio_pin) && timeout--)
         udelay(1);
 
     if (timeout == -1)
@@ -76,14 +83,14 @@ static int dht11_read_data(void)
         uint8_t byte = 0;
         for (i = 0; i < 8; i++) {
             timeout = 300;
-            while (gpio_get_value(dht11[0].gpio) && timeout--)
+            while (gpio_get_value(dht11_gpio_pin) && timeout--)
                 udelay(1);
 
             if (timeout == -1)
                 return -ETIMEDOUT;
 
             timeout = 300;
-            while (!gpio_get_value(dht11[0].gpio) && timeout--)
+            while (!gpio_get_value(dht11_gpio_pin) && timeout--)
                 udelay(1);
 
             if (timeout == -1)
@@ -91,7 +98,7 @@ static int dht11_read_data(void)
 
             udelay(50);
             byte <<= 1;
-            if (gpio_get_value(dht11[0].gpio))
+            if (gpio_get_value(dht11_gpio_pin))
                 byte |= 0x01;
         }
         sensor_data[j] = byte;
@@ -101,7 +108,7 @@ static int dht11_read_data(void)
                                     sensor_data[2] + sensor_data[3]))
         return -EIO;
 
-    gpio_direction_output(dht11[0].gpio, 1);
+    gpio_direction_output(dht11_gpio_pin, 1);
     sprintf(msg, "Humidity: %d%%\nTemperature: %d deg C\n", sensor_data[0],
             sensor_data[2]);
 
@@ -118,7 +125,7 @@ static int device_open(struct inode *inode, struct file *file)
             return 0;
         msleep(10);
     }
-    gpio_direction_output(dht11[0].gpio, 1);
+    gpio_direction_output(dht11_gpio_pin, 1);
 
     return ret;
 }
@@ -210,24 +217,24 @@ static int __init dht11_init(void)
 
     pr_info("Device created on /dev/%s\n", DEVICE_NAME);
 
-    ret = gpio_request(dht11[0].gpio, dht11[0].label);
+    ret = gpio_request(dht11_gpio_pin, dht11_gpio_label);
 
     if (ret) {
         pr_err("Unable to request GPIOs for dht11: %d\n", ret);
         goto fail4;
     }
 
-    ret = gpio_direction_output(dht11[0].gpio, 1);
+    ret = gpio_direction_output(dht11_gpio_pin, 1);
 
     if (ret) {
-        pr_err("Failed to set GPIO %d direction\n", dht11[0].gpio);
+        pr_err("Failed to set GPIO %d direction\n", dht11_gpio_pin);
         goto fail5;
     }
 
     return 0;
 
 fail5:
-    gpio_free(dht11[0].gpio);
+    gpio_free(dht11_gpio_pin);
 
 fail4:
     device_destroy(dht11_device.cls, dht11_device.dev_num);
@@ -246,8 +253,8 @@ fail1:
 
 static void __exit dht11_exit(void)
 {
-    gpio_set_value(dht11[0].gpio, 0);
-    gpio_free(dht11[0].gpio);
+    gpio_set_value(dht11_gpio_pin, 0);
+    gpio_free(dht11_gpio_pin);
 
     device_destroy(dht11_device.cls, dht11_device.dev_num);
     class_destroy(dht11_device.cls);

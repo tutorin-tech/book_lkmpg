@@ -5,6 +5,7 @@
 #include <linux/init.h>
 #include <linux/kd.h> /* For KDSETLED */
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/tty.h> /* For tty_struct */
 #include <linux/vt.h> /* For MAX_NR_CONSOLES */
 #include <linux/vt_kern.h> /* for fg_console */
@@ -74,7 +75,11 @@ static int __init kbleds_init(void)
 static void __exit kbleds_cleanup(void)
 {
     pr_info("kbleds: unloading...\n");
-    del_timer(&my_timer);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+    timer_delete_sync(&my_timer);
+#else
+    del_timer_sync(&my_timer);
+#endif
     (my_driver->ops->ioctl)(vc_cons[fg_console].d->port.tty, KDSETLED,
                             RESTORE_LEDS);
 }

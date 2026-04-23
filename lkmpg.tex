@@ -436,9 +436,9 @@ Typically, \cpp|init_module()| either registers a handler for something with the
 or it replaces one of the kernel functions with its own code (usually code to do something and then call the original function).
 The \cpp|cleanup_module()| function is supposed to undo whatever \cpp|init_module()| did, so the module can be unloaded safely.
 
-Lastly, every kernel module needs to include \verb|<linux/module.h>|.
+Lastly, every kernel module needs to include \src{include/linux/module.h}.
 % TODO: adjust the section anchor
-We needed to include \verb|<linux/printk.h>| only for the macro expansion for the \cpp|pr_alert()| log level, which you'll learn about in \Cref{sec:printk}.
+We needed to include \src{include/linux/printk.h} only for the macro expansion for the \cpp|pr_alert()| log level, which you'll learn about in \Cref{sec:printk}.
 
 \begin{enumerate}
   \item A point about coding style.
@@ -1428,6 +1428,57 @@ Since Linux v2.6.0, the \cpp|kobject| structure made its appearance.
 It was initially meant as a simple way of unifying kernel code which manages reference counted objects.
 After a bit of mission creep, it is now the glue that holds much of the device model and its sysfs interface together.
 For more information about kobject and sysfs, see \src{Documentation/driver-api/driver-model/driver.rst} and \url{https://lwn.net/Articles/51437/}.
+
+\section{debugfs: Flexible debugging interfaces}
+\label{sec:debugfs}
+\emph{debugfs} is a lightweight filesystem for exporting debugging information from the kernel to userspace.
+Unlike \verb|sysfs|, it is not intended to provide a stable userspace ABI, and unlike \verb|/proc| it does not try to model processes or broader kernel state.
+That makes it a good fit for ad hoc diagnostics, counters, and developer-oriented control points while a module is under active development.
+
+The canonical introduction is \src{Documentation/filesystems/debugfs.rst}, which describes both the design goals and the helper APIs.
+On most systems, debugfs is mounted at \verb|/sys/kernel/debug|:
+
+\begin{codebash}
+mount | grep debugfs
+ls -l /sys/kernel/debug
+\end{codebash}
+
+To use the interface, include \src{include/linux/debugfs.h} and create a top-level directory for your module:
+
+\begin{code}
+struct dentry *debugfs_create_dir(const char *name, struct dentry *parent);
+\end{code}
+
+Passing \cpp|NULL| as the parent places the new directory at the root of debugfs.
+When you unload the module, remove the whole subtree with \cpp|debugfs_remove_recursive()|.
+Note that \cpp|debugfs_create_dir()| and the other \verb|debugfs_create_*()| helpers are designed to be used in a fire-and-forget fashion: their return values should not be checked.
+If debugfs is unavailable or an entry cannot be created, the helpers return an error pointer that is silently accepted by subsequent calls and by \cpp|debugfs_remove_recursive()|, so the module continues to work without its debug interface.
+
+For simple scalar values, debugfs provides typed helpers that map a kernel variable directly to a file.
+Common examples include \cpp|debugfs_create_u32()|, \cpp|debugfs_create_bool()|, and the hexadecimal variants such as \cpp|debugfs_create_x32()|.
+These helpers are convenient when the data already lives in a fixed-size variable and does not need custom formatting.
+
+The following example creates a debugfs directory and exports a writable integer plus a boolean flag:
+
+\samplec{examples/hello-debugfs.c}
+
+If you need a custom text format or more control over reads and writes, create a file with your own \cpp|struct file_operations|:
+
+\begin{code}
+struct dentry *debugfs_create_file(const char *name, umode_t mode,
+                                   struct dentry *parent, void *data,
+                                   const struct file_operations *fops);
+\end{code}
+
+debugfs also includes helpers for a few common read-only payloads.
+One of them is \cpp|debugfs_create_blob()|, which exposes an existing memory region as a file.
+
+The next example combines both approaches by creating a writable debugfs file and a read-only blob in the same directory:
+
+\samplec{examples/hello-debugfs-file.c}
+
+Because debugfs is explicitly for debugging, its contents should be treated as implementation details rather than a supported external interface.
+If a setting must remain stable for tooling, scripts, or end users, prefer \verb|sysfs| or another documented ABI instead.
 
 \section{Talking To Device Files}
 \label{sec:device_files}
