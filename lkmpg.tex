@@ -1,5 +1,7 @@
 \documentclass[10pt, oneside]{book}
+\ifdefined\HCode\else
 \usepackage[Bjornstrup]{fncychap}
+\fi
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{graphicx}
@@ -35,11 +37,13 @@
   urlcolor = {blue!80!black}
 }
 
+\makeatletter
+\@removefromreset{section}{chapter}
+\makeatother
+\renewcommand{\thesection}{\arabic{section}}
+
 \input{lib/codeblock}
 \input{lib/kernelsrc}
-
-% FIXME: classify with chapters instead of sections
-\renewcommand{\thesection}{\arabic{section}}
 
 \author{Peter Jay Salzman, Michael Burian, Ori Pomerantz, Bob Mottram, Jim Huang}
 \date{\today}
@@ -49,7 +53,7 @@
 \maketitle
 \ifdefined\HCode
 \includegraphics{assets/cover-with-names.png}
-% turn off TOC
+\tableofcontents
 \else
 \pagestyle{empty}
 \begin{tikzpicture}[remember picture, overlay]
@@ -60,6 +64,12 @@
 \end{tikzpicture}
 \tableofcontents
 \fi
+
+\chapter{Getting Started}
+This chapter introduces the guide, outlines the basic development environment,
+and builds up from the first loadable module. The emphasis is on getting a
+working workflow in place before moving on to the broader kernel interfaces
+used by more capable modules.
 
 \section{Introduction}
 \label{sec:introduction}
@@ -204,7 +214,7 @@ It is reassuring to note that overcoming the initial obstacle on the first attem
         more detailed steps for \href{https://wiki.debian.org/SecureBoot}{SecureBoot} can be explored and followed.
 \end{enumerate}
 
-\section{Headers}
+\section{Kernel Headers}
 \label{sec:headers}
 Before building anything, it is necessary to install the header files for the kernel.
 
@@ -739,6 +749,12 @@ $ make
 
 If you do not desire to actually compile the kernel, you can interrupt the build process (CTRL-C) just after the SPLIT line, because at that time, the files you need are ready.
 Now you can turn back to the directory of your module and compile it: It will be built exactly according to your current kernel settings, and it will load into it without any errors.
+
+\chapter{Core Kernel Interfaces}
+With the toolchain and first examples out of the way, the focus shifts to the
+interfaces that let modules cooperate with the rest of the kernel. The
+following sections introduce execution basics and then move through the common
+entry points used to expose functionality to user space.
 
 \section{Preliminaries}
 \subsection{How modules begin and end}
@@ -1454,6 +1470,13 @@ The solution is using atomic Compare-And-Swap (CAS), which we mentioned at \Cref
 
 \samplec{examples/other/userspace_ioctl.c}
 
+\chapter{Execution Context and Control Flow}
+Kernel code runs under a variety of constraints depending on where it executes.
+Some paths may sleep, some must return quickly, and some need careful
+synchronization to stay correct on modern SMP systems. This chapter collects
+the mechanisms that shape control flow, blocking behavior, deferred work, and
+debugging.
+
 \section{System Calls}
 \label{sec:syscall}
 So far, the only thing we've done was to use well defined kernel mechanisms to register \verb|/proc| files and device handlers.
@@ -1919,6 +1942,12 @@ Logging over a netconsole might also be worth a try.
 While you have seen lots of stuff that can be used to aid debugging here, there are some things to be aware of. Debugging is almost always intrusive.
 Adding debug code can change the situation enough to make the bug seem to disappear.
 Thus, you should keep debug code to a minimum and make sure it does not show up in production code.
+
+\chapter{Hardware Integration and Advanced Topics}
+The remaining material brings together hardware-facing examples and the kernel
+subsystems that support them. It also closes the guide with a compact set of
+optimization notes, common mistakes, and references for readers who want to
+keep exploring beyond the examples in this book.
 
 \section{GPIO}
 \label{sec:gpio}
