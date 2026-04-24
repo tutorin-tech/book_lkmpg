@@ -43,6 +43,7 @@ obj-m += vnetloop.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(CURDIR)
+CLANG_FORMAT ?= $(shell command -v clang-format-20 2>/dev/null || command -v clang-format 2>/dev/null)
 
 ifeq ($(CONFIG_STATUS_CHECK_GCC),y)
 CC=$(STATUS_CHECK_GCC)
@@ -57,5 +58,9 @@ clean:
 	$(RM) other/cat_nonblock *.plist
 
 indent:
-	clang-format -i *.[ch]
-	clang-format -i other/*.[ch]
+	@if [ -z "$(CLANG_FORMAT)" ]; then \
+		echo "No clang-format found. Install clang-format-20 or clang-format." >&2; \
+		exit 1; \
+	fi
+	"$(CLANG_FORMAT)" -i *.[ch]
+	"$(CLANG_FORMAT)" -i other/*.[ch]

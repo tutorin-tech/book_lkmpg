@@ -15,7 +15,7 @@ html: lkmpg.tex html.cfg assets/Manrope_variable.ttf
 	rm -rf _minted-$(PROJ) _minted-lkmpg-for-ht
 
 indent:
-	(cd examples; find . -name '*.[ch]' | xargs clang-format -i)
+	$(MAKE) -C examples indent
 
 clean:
 	rm -f *.dvi *.aux *.log *.ps *.pdf *.out lkmpg.bbl lkmpg.blg lkmpg.lof lkmpg.toc lkmpg.fdb_latexmk lkmpg.fls
