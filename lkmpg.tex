@@ -85,7 +85,7 @@ No explicit permission is required from the author for reproduction of this book
 
 Derivative works and translations of this document must be placed under the Open Software License, and the original copyright notice must remain intact.
 If you have contributed new material to this book, you must make the material and source code available for your revisions.
-Please make revisions and updates available directly to the document maintainer, Jim Huang <jserv@ccns.ncku.edu.tw>.
+Please make revisions and updates available directly to the document maintainer, Ching-Chun (Jim) Huang <jserv@ccns.ncku.edu.tw>.
 This will allow for the merging of updates and provide consistent revisions to the Linux community.
 
 If you publish or distribute this book commercially, donations, royalties,
@@ -104,7 +104,7 @@ leading to Michael Burian joining as a co-maintainer to bring the guide up to sp
 Bob Mottram contributed to the guide by updating examples for Linux v3.8 and later.
 Jim Huang then undertook the task of updating the guide for recent Linux versions (v5.0 and beyond),
 along with revising the LaTeX document.
-The guide continues to be maintained for compatibility with modern kernels (v6.x series) while ensuring examples work with older LTS kernels.
+The guide now uses Linux v5.10 as its minimum supported baseline and aims to keep examples and guidance compatible across current long-term support kernels.
 
 \subsection{Acknowledgements}
 \label{sec:acknowledgements}
@@ -1569,6 +1569,66 @@ The solution is using atomic Compare-And-Swap (CAS), which we mentioned at \Cref
 
 \samplec{examples/other/userspace_ioctl.c}
 
+\subsection{poll, select, and epoll}
+\label{sec:poll_select_epoll}
+The traditional \cpp|read()| and \cpp|write()| paths are not enough for every
+character device.
+Many programs need to wait on multiple file descriptors at once, and for that
+they use \cpp|poll()|, \cpp|select()|, or most commonly \cpp|epoll|.
+If a driver can block in \cpp|read()| or \cpp|write()|, it usually also needs a
+\cpp|poll| callback so userspace can discover when the operation would make
+progress without spinning.
+
+The kernel-side implementation is centered on the \cpp|poll| file operation.
+The callback receives a \cpp|poll_table_struct|, and the usual pattern is to
+register the caller with one or more wait queues using \cpp|poll_wait()| before
+computing the readiness mask to return.
+That mask is built from \cpp|EPOLLIN|, \cpp|EPOLLOUT|, \cpp|EPOLLERR|,
+\cpp|EPOLLHUP|, and related bits.
+The names still mention epoll, but the same mask is used by \cpp|poll()| and
+\cpp|select()|.
+
+Correct readiness reporting matters because modern event loops often rely on
+edge-triggered epoll.
+If a driver returns readable status without guaranteeing that a subsequent
+\cpp|read()| can consume data, or forgets to wake waiters after state changes,
+userspace can wedge in hard-to-debug ways.
+Likewise, returning \cpp|EPOLLHUP| or \cpp|EPOLLERR| too eagerly can make a
+device appear permanently dead.
+The rule of thumb is simple: the mask should describe what a nonblocking call
+would be able to do \emph{right now}.
+
+When device state changes, wake the relevant wait queue.
+If you want fine-grained wakeups, use \cpp|wake_up_interruptible_poll()| with
+the same event bits your \cpp|poll| callback reports.
+That allows userspace to sleep efficiently until the device becomes readable,
+writable, or otherwise transitions into a new state.
+
+The sleep example in \Cref{sec:sleep} already demonstrates the wait-queue side
+of blocking I/O.
+Adding \cpp|poll| support to a driver is mostly a matter of exposing that same
+state transition to event-driven applications instead of forcing them to block
+in one system call at a time.
+
+\subsection{Asynchronous notification}
+\label{sec:async_notification}
+Another classic mechanism described in LDD3 is asynchronous notification via
+\cpp|SIGIO|.
+This is implemented with the \cpp|fasync| file operation and helpers such as
+\cpp|fasync_helper()| and \cpp|kill_fasync()|.
+When enabled from userspace with \cpp|fcntl(F\_SETFL, O\_ASYNC)|, the process
+receives a signal when the device becomes ready.
+
+This interface still exists in Linux 5.10 and later, but it is much less common than
+\cpp|poll| and epoll-based designs.
+Signals are process-directed, relatively coarse, and awkward in multithreaded
+programs.
+For new user interfaces, a well-behaved \cpp|poll| implementation is usually
+the better default.
+Still, \cpp|fasync| remains useful for compatibility with older applications or
+for small control-style devices that only need to notify userspace that some
+event happened.
+
 \chapter{Execution Context and Control Flow}
 Kernel code runs under a variety of constraints depending on where it executes.
 Some paths may sleep, some must return quickly, and some need careful
@@ -2045,6 +2105,296 @@ While you have seen lots of stuff that can be used to aid debugging here, there 
 Adding debug code can change the situation enough to make the bug seem to disappear.
 Thus, you should keep debug code to a minimum and make sure it does not show up in production code.
 
+\chapter{Memory, Time, and Data Movement}
+LDD3 devoted separate chapters to time handling, memory allocation, and moving
+data between the CPU, userspace, and devices.
+Those topics are still central in Linux 5.10 and later, but the modern kernel expects more
+care around sleeping rules, lifetime management, and API selection.
+This chapter collects the concepts that most often determine whether a driver is
+merely functional or actually robust.
+
+\section{Timekeeping and Deferred Execution}
+\label{sec:timekeeping}
+Time in the kernel comes in several flavors, and choosing the wrong one is a
+common source of subtle bugs.
+For measuring elapsed intervals inside the kernel, prefer the monotonic clocks
+exposed through the ktime interfaces.
+For user-visible timestamps, use the real-time interfaces only if you truly want
+wall-clock behavior that can jump when the system clock is adjusted.
+Older code often leans heavily on jiffies; that is still valid for coarse
+timeouts, but newer code should treat jiffies as the low-resolution option
+rather than the universal time type.
+
+Delays also need to match context.
+Busy-wait helpers such as \cpp|udelay()|, \cpp|ndelay()|, and \cpp|mdelay()|
+keep the CPU occupied and should be reserved for very short hardware sequences
+or atomic context where sleeping is forbidden.
+In process context, sleeping helpers such as \cpp|msleep()|,
+\cpp|usleep_range()|, and the wait-event family are usually preferable because
+they let the scheduler run other work.
+On a modern kernel, \cpp|usleep_range()| is often a better fit than
+\cpp|udelay()| once the delay is long enough that spinning would just waste CPU
+time and energy.
+
+Kernel timers remain useful for deferred work that only needs a callback at some
+future point.
+As discussed in \Cref{sec:flash_kb_led}, recent kernels use
+\cpp|timer_setup()| and a typed \cpp|struct timer_list *| callback.
+For higher precision or explicit clock selection, \cpp|hrtimer| exists, but it
+comes with tighter constraints and is best introduced only when ordinary timers
+are not precise enough.
+
+Deferred work now has a clearer hierarchy than many older texts suggest.
+If the work may sleep or needs to call APIs that can sleep, queue it to a
+workqueue.
+If it must run in hardirq or softirq context, keep it short and think carefully
+about whether a threaded interrupt handler or workqueue would be simpler.
+Tasklets still exist in current kernels, but they are being phased out and are
+best treated as legacy infrastructure for existing code rather than the default
+tool for new modules.
+The examples in \Cref{sec:tasklet}, \Cref{sec:workqueue}, and
+\Cref{sec:threaded_irq} show these tradeoffs in increasing order of flexibility.
+
+\section{Memory Allocation and Ownership}
+\label{sec:memory_allocation}
+Dynamic allocation is where driver correctness starts to depend on execution
+context.
+The first question is not ``how much memory do I need?'' but ``am I allowed to
+sleep right now?''.
+Allocations with \cpp|GFP_KERNEL| may sleep and are therefore appropriate for
+process context.
+Allocations from hard interrupt context, softirq context, or any region holding
+a raw spinlock must use non-sleeping flags such as \cpp|GFP_ATOMIC| and should
+be kept small.
+Using the wrong flag is one of the fastest ways to trigger ``sleeping function
+called from invalid context'' warnings.
+
+For most small and medium-sized objects, \cpp|kmalloc()| and its relatives are
+the starting point.
+\cpp|kzalloc()| is preferred when the object contains fields that should begin
+life zeroed, and \cpp|kcalloc()| avoids integer-overflow mistakes when
+allocating arrays.
+If the size can become large or highly variable, \cpp|kvmalloc()| is often the
+modern choice because it tries \cpp|kmalloc()| first and falls back to
+\cpp|vmalloc()| when needed.
+That keeps the common case fast without forcing the caller to maintain two code
+paths.
+
+\cpp|vmalloc()| has a different tradeoff profile.
+It provides virtually contiguous memory, not physically contiguous memory, and
+therefore has higher overhead and different cache/TLB behavior.
+It is useful for large software buffers, but it is not a substitute for memory
+that must be physically contiguous for DMA.
+Similarly, driver authors should resist the temptation to guess at allocator
+internals or to depend on low-level layout details that are not part of the API.
+
+Ownership is just as important as allocation.
+In Linux 5.10 and later, many drivers benefit from managed-resource helpers such as
+\cpp|devm_kzalloc()| and friends when they are written as proper device-model
+drivers with a \cpp|struct device|.
+Managed allocation ties resource cleanup to device detach and simplifies error
+paths considerably.
+For standalone modules or global objects, explicit unwind paths are still
+required, and they should be structured so that every successful acquisition has
+exactly one matching release.
+
+Reference counting deserves dedicated attention.
+Do not use \cpp|atomic_t| as an ad hoc reference counter in new code.
+Use \cpp|refcount_t| or \cpp|kref| so overflow and misuse are easier to detect.
+When an object can outlive the operation that found it, the lifetime rules need
+to be stated clearly in code, not left as an implicit convention.
+
+\section{Copying Data Across the User-Kernel Boundary}
+\label{sec:user_kernel_boundary}
+Every character driver eventually has to move data between userspace and kernel
+space.
+The important rule is that a userspace pointer is not a normal pointer.
+It may fault, it may refer to memory that disappears after rescheduling, and it
+must only be touched through the \cpp|copy_to_user()|, \cpp|copy_from_user()|,
+\cpp|get_user()|, and \cpp|put_user()| families or other APIs that explicitly
+document \cpp|__user| handling.
+
+These helpers may sleep because servicing a page fault can require blocking.
+As a result, they must not be called while holding spinlocks, from hardirq
+context, or from any other atomic context.
+This is a frequent source of bugs when a driver evolves from a simple example
+into a version that adds locking later.
+The safe pattern is to gather the data you need while protected, drop the
+non-sleeping lock, and then copy to or from userspace.
+
+Short copies are not automatically errors.
+The helpers return the number of bytes that could not be transferred, and
+drivers usually translate that into a successful partial read or write when some
+progress was made, or \cpp|-EFAULT| when nothing could be copied.
+Getting these corner cases right is part of presenting a sane userspace ABI.
+It is also good practice to validate lengths early, prefer fixed layouts for
+\cpp|ioctl| payloads, and reserve space in uapi structures for future
+extensions instead of breaking binary compatibility later.
+
+\section{Memory-Mapped I/O and Register Access}
+\label{sec:mmio}
+Once a driver starts talking to hardware registers, ordinary C pointer access is
+no longer enough.
+Device registers are memory-mapped I/O, not normal RAM, and they must be
+requested, mapped, and accessed through the proper kernel interfaces.
+On modern kernels, platform and PCI drivers usually rely on helpers such as
+\cpp|platform_get_resource()|, \cpp|devm_ioremap_resource()|, or the
+subsystem-specific wrappers that combine resource lookup and mapping.
+
+After mapping, use the accessor APIs such as \cpp|readb()|, \cpp|readl()|,
+\cpp|writeb()|, and \cpp|writel()| rather than dereferencing pointers directly.
+Those accessors exist because different architectures impose different ordering
+and width requirements.
+Relaxed accessors are also available, but they should only be used when the
+driver author can explain the ordering guarantees at the boundary with the
+device.
+If you cannot state why relaxed ordering is correct, it probably is not the
+right default.
+
+Port I/O still exists on some architectures and for some buses, but MMIO-backed
+devices are the dominant case for Linux 5.10-and-later driver work.
+Even when the underlying example hardware is simple, it is worth adopting the
+resource-management pattern used by real drivers because that is what scales to
+platform buses, PCI, and Device Tree described hardware.
+
+\section{DMA and mmap}
+\label{sec:dma_mmap}
+Direct memory access is one of the areas where old folklore causes real damage.
+A driver must not assume that a CPU virtual address can be turned into a DMA
+address with \cpp|virt_to_phys()| and handed to hardware.
+The DMA API exists because IOMMUs, cache coherency rules, and device addressing
+limits vary by architecture and platform.
+If a device performs DMA, use the DMA mapping interfaces and establish the
+correct mask with helpers such as \cpp|dma_set_mask_and_coherent()|.
+
+The API splits broadly into coherent mappings and streaming mappings.
+Coherent allocations, typically created with \cpp|dma_alloc_coherent()|, are
+easy to reason about and are a good fit for descriptors or control rings.
+Streaming mappings, created with \cpp|dma_map_single()| or related helpers, are
+better for transient data buffers but require explicit unmapping and, on some
+systems, synchronization between CPU and device ownership.
+The core rule is that the buffer ownership protocol must be explicit: know when
+the CPU may touch the memory and when the device may touch it.
+
+\subsection{DMA Addressing and Ownership Rules}
+\label{sec:dma_rules}
+The first step in a DMA-capable driver is telling the kernel what address width
+the device can actually drive.
+That is the purpose of \cpp|dma_set_mask_and_coherent()| or its split variants.
+If a device can only issue 32-bit DMA addresses on a system with memory above
+4 GiB, the kernel needs to know that before any buffers are allocated or mapped.
+Getting the mask wrong can lead to failures that only show up on certain
+machines, which is one reason DMA bugs are so frustrating to debug.
+
+The second step is choosing the ownership model.
+For coherent allocations, the CPU and device see the same memory without
+explicit cache maintenance by the driver, so they are a natural fit for
+descriptor rings, producer-consumer indices, and other control structures.
+That does not mean no synchronization is needed.
+The driver still has to order accesses correctly with respect to doorbells,
+status bits, and descriptor visibility.
+Coherent memory solves cache-coherency problems, not higher-level protocol
+mistakes.
+
+Streaming mappings are more performance-oriented but stricter.
+The driver maps a CPU buffer for a specific transfer direction with interfaces
+such as \cpp|dma_map_single()|, \cpp|dma_map_page()|, or scatter-gather helpers,
+hands the DMA address to the device, and later unmaps or synchronizes it.
+The important invariant is that the CPU must not treat the buffer as ordinary
+memory while the device owns it.
+On non-coherent systems, ignoring that rule can lead to stale or silently
+corrupted data; on coherent systems, it can still violate the driver's own
+protocol and create races.
+
+\subsection{Scatter-Gather and DMA API Patterns}
+\label{sec:dma_sg}
+Once transfers grow beyond a single small buffer, drivers usually stop thinking
+in terms of one DMA address and start thinking in terms of scatter-gather
+lists.
+The Linux DMA API supports this through \cpp|struct scatterlist| and helpers
+such as \cpp|sg_init_table()|, \cpp|dma_map_sg()|, and \cpp|dma_unmap_sg()|.
+That allows a driver to hand the device a list of segments without first
+copying everything into one physically contiguous buffer.
+
+This matters for both throughput and allocation pressure.
+Large physically contiguous buffers are expensive and sometimes impossible to
+obtain on long-running systems.
+Scatter-gather lets the IOMMU or the device itself stitch the transfer together
+from ordinary pages, which is much closer to how high-performance storage and
+network devices actually operate.
+
+The streaming DMA direction also deserves care.
+Use the correct direction flag, such as \cpp|DMA_TO_DEVICE|,
+\cpp|DMA_FROM_DEVICE|, or \cpp|DMA_BIDIRECTIONAL|, because the architecture and
+IOMMU code use that information to apply the right synchronization rules.
+\cpp|DMA_BIDIRECTIONAL| is not a harmless default; it is a weaker statement of
+intent and can impose avoidable costs.
+
+\subsection{DMA Debugging and Common Mistakes}
+\label{sec:dma_debug}
+When bringing up a DMA driver, enable the kernel's DMA-API debugging facilities
+if the configuration supports them.
+They can catch double unmaps, direction mismatches, mapping leaks, and other
+lifetime errors early enough to be understandable.
+The most common beginner mistakes are all variations of the same theme:
+forgetting that the DMA address space is an abstraction.
+
+Do not mix CPU physical addresses with DMA addresses.
+Do not keep using a streaming-mapped buffer after unmapping it.
+Do not map memory that the device will never actually access.
+Do not assume that a successful mapping on one machine means the code is
+portable to systems with non-coherent caches, SWIOTLB bounce buffering, or an
+active IOMMU.
+If a driver stays disciplined about those rules, the DMA API becomes manageable
+rather than mysterious.
+
+The following sample creates a synthetic platform device so the module can walk
+through a realistic DMA setup path without depending on external hardware.
+It sets a DMA mask, allocates coherent memory, performs a streaming mapping,
+and logs the resulting DMA addresses during probe.
+The sample stays within interfaces available on Linux v5.10, so it also builds
+cleanly on newer 6.x kernels without needing 6.x-only driver callbacks:
+
+\samplec{examples/dma.c}
+
+Some drivers also map buffers into userspace with \cpp|mmap|.
+That can provide zero-copy data paths, but it introduces its own lifetime and
+coherency problems.
+The \cpp|mmap| file operation is therefore not just a performance feature; it is
+an ABI commitment.
+If a driver exposes memory this way, it must define what happens across fork,
+device removal, short-lived mappings, and cache visibility boundaries.
+That is why many drivers begin with \cpp|read()| and \cpp|write()| interfaces
+and only add \cpp|mmap| when measurement shows the extra complexity is worth it.
+
+\section{Modern Interface Choices for Linux 5.10 and Later}
+\label{sec:modern_interfaces}
+One of the harder parts of learning from LDD3 is separating durable concepts
+from interfaces that are now discouraged.
+The conceptual material remains excellent; the concrete APIs often need
+translation.
+Several examples in this guide intentionally preserve older techniques for
+teaching purposes, but new production drivers should make different default
+choices.
+
+For procfs, prefer \cpp|struct proc_ops|, as shown in
+\Cref{sec:proc_ops}, rather than older \cpp|file_operations|-based
+registration patterns.
+For GPIO, the descriptor-based \cpp|gpiod_*| API is the preferred direction for
+new drivers, while the legacy integer GPIO API is best viewed as compatibility
+infrastructure and example material.
+For deferred work, choose workqueues or threaded interrupts before tasklets.
+For reference counts, choose \cpp|refcount_t| or \cpp|kref| before \cpp|atomic_t|.
+For device-managed drivers, prefer \cpp|devm_*| helpers so probe error paths and
+remove paths stay understandable.
+
+The strongest warning applies to syscall-table patching.
+As described in \Cref{sec:syscall}, direct system-call hooking is increasingly
+blocked by modern kernel hardening and is not a viable design pattern on current
+Linux 5.10-and-later kernels.
+Treat it as a historical and diagnostic example, not as a foundation for new
+module work.
+
 \chapter{Hardware Integration and Advanced Topics}
 The remaining material brings together hardware-facing examples and the kernel
 subsystems that support them. It also closes the guide with a compact set of
@@ -2411,6 +2761,441 @@ echo "-34" | sudo tee /dev/vinput0
 \samplec{examples/vkbd.c}
 
 % TODO: Add vts.c and vmouse.c example
+
+\section{PCI Drivers}
+\label{sec:pci}
+PCI and PCI Express are the most common discovery-based buses on desktop and
+server systems.
+Unlike the earlier GPIO or simple platform examples, a PCI driver usually does
+not instantiate devices itself.
+Instead, the kernel enumerates devices during boot or hotplug, identifies them
+by vendor and device identifiers, and calls into a driver whose match table
+declares support for that hardware.
+
+The kernel-side entry point is \cpp|struct pci_driver|.
+Much like \cpp|platform_driver|, it provides \cpp|probe| and \cpp|remove|
+callbacks plus an ID table.
+The driver is then registered with \cpp|pci_register_driver()| or, more often
+in modern code, with the helper macros that wrap it.
+When the bus finds a matching device, the probe function receives a
+\cpp|struct pci_dev *| and can start claiming resources.
+
+The common probe sequence has a recognizable shape:
+\begin{enumerate}
+  \item Enable the device with \cpp|pcim_enable_device()| or \cpp|pci_enable_device()|.
+  \item Set an appropriate DMA mask before preparing DMA-capable queues or buffers.
+  \item Request and map BAR resources, commonly through managed helpers layered on top of the resource API.
+  \item Configure interrupts, often preferring MSI or MSI-X when the device and platform support them.
+  \item Register the higher-level interface the driver exposes, such as a network device, block device, or character device.
+\end{enumerate}
+
+BARs (Base Address Registers) are how PCI devices expose MMIO or I/O port
+regions.
+The driver should never assume fixed physical addresses; it must query the
+device through the PCI core and map the returned resource.
+That is one of the clearest examples of why real drivers are built around bus
+enumeration rather than hard-coded addresses.
+
+Interrupt handling is also more structured than in ad hoc examples.
+Legacy INTx interrupts still exist, but MSI and MSI-X are usually preferred for
+modern PCIe hardware because they integrate better with multicore systems and
+avoid many sharing issues of pin-based interrupts.
+Still, the same context rules apply: the top half should do the minimum
+required work, and any operation that may sleep belongs in a threaded handler,
+NAPI poll loop, workqueue, or subsystem-specific deferred path.
+
+PCI drivers also make heavy use of the device model.
+Each \cpp|pci_dev| embeds a \cpp|struct device|, which means managed resources,
+sysfs integration, power management hooks, DMA configuration, and hot-unplug
+notification all flow through the same core infrastructure described later in
+\Cref{sec:device_model}.
+Once a driver moves beyond toy examples, that integration is usually more
+important than the raw bus API itself.
+
+Linux 5.10-and-later code should also prefer the managed PCI interfaces where they fit.
+Helpers such as \cpp|pcim_enable_device()| and the device-managed resource
+APIs reduce teardown bugs dramatically, especially in drivers with multiple BARs
+or several error paths in probe.
+The goal is not just brevity; it is making probe failure and device removal
+boringly correct.
+
+\section{USB Drivers}
+\label{sec:usb}
+USB is one of the biggest conceptual gaps between classic module tutorials and
+production driver work.
+The bus is hotpluggable by design, devices may appear and disappear at any
+time, configuration happens through descriptors rather than fixed wiring, and
+many drivers bind to interfaces rather than whole devices.
+That means USB code spends more effort on discovery, lifetime management, and
+I/O submission than on direct register access.
+
+\subsection{USB Device Model Basics}
+\label{sec:usb_basics}
+The USB core enumerates each newly attached device, reads its descriptors, and
+creates kernel objects that represent the device and its interfaces.
+Most function drivers bind to a \cpp|struct usb_interface| rather than directly
+to \cpp|struct usb_device|.
+This matters because one physical USB device can expose multiple interfaces,
+such as a combined webcam and microphone or a composite gadget with separate
+control and data functions.
+
+A USB driver typically declares a \cpp|struct usb_driver| and an ID table of
+\cpp|struct usb_device_id| entries.
+Matching can be done on vendor/product identifiers, device class, interface
+class, or combinations of those fields.
+Once registered with \cpp|usb_register_driver()|, the driver is called via
+\cpp|probe| when a matching interface appears and \cpp|disconnect| when it goes
+away.
+The disconnect path is not optional bookkeeping; it is a normal and frequent
+event on USB systems.
+
+The minimal skeleton looks conceptually like this:
+\begin{code}
+static const struct usb_device_id my_table[] = {
+    { USB_DEVICE(0x1234, 0x5678) },
+    { }
+};
+MODULE_DEVICE_TABLE(usb, my_table);
+
+static struct usb_driver my_driver = {
+    .name = "my_usb_driver",
+    .probe = my_probe,
+    .disconnect = my_disconnect,
+    .id_table = my_table,
+};
+\end{code}
+
+The \cpp|probe| callback usually stores per-interface state with
+\cpp|usb_set_intfdata()|, retrieves endpoint information from the current
+alternate setting, allocates transfer buffers, and registers whatever
+higher-level interface will be visible to userspace.
+The matching \cpp|disconnect| callback must stop new I/O, tear down submitted
+transfers, and release those resources without assuming that userspace already
+closed every file descriptor.
+
+\subsection{Endpoints, Pipes, and URBs}
+\label{sec:usb_urbs}
+USB communication is organized around endpoints.
+Descriptors tell the driver which endpoints exist, in which direction data
+flows, and whether each endpoint carries control, bulk, interrupt, or
+isochronous traffic.
+Drivers do not poke MMIO registers directly; instead they submit requests to the
+USB core, which hands them to a host-controller driver appropriate for the
+system's hardware.
+
+The fundamental I/O object is the URB, or USB Request Block.
+A URB describes one transfer: the target pipe, a buffer, a length, a completion
+callback, and assorted flags.
+The driver allocates or initializes a URB, fills it with helper routines such as
+\cpp|usb_fill_bulk_urb()| or \cpp|usb_fill_int_urb()|, and submits it with
+\cpp|usb_submit_urb()|.
+Completion is asynchronous.
+That means the callback may run long after the initiating operation returned,
+and it may race with disconnect, timeout, suspend, or userspace shutdown.
+
+URB lifetime rules are therefore central.
+The completion handler must know whether the enclosing device object is still
+alive, and the disconnect path must cancel outstanding traffic with interfaces
+such as \cpp|usb_kill_urb()| or \cpp|usb_poison_urb()| before tearing down the
+state they reference.
+This is a place where reference counting and explicit ownership discipline are
+not optional style points; they are the difference between a robust driver and a
+use-after-free bug.
+
+Control transfers are often used for small device-specific commands and
+enumeration-time setup.
+Bulk transfers are the usual choice for throughput-oriented data such as storage
+or vendor-defined streams.
+Interrupt transfers are polled by the host at bounded intervals and are common
+for HID-style status traffic.
+Isochronous transfers exist for time-sensitive media streams, but they have more
+complex buffering and error behavior than a beginner guide usually needs to
+cover in detail.
+
+\subsection{USB and Userspace Interfaces}
+\label{sec:usb_userspace}
+One of the strengths of USB is that many common device classes already have
+generic kernel drivers.
+Keyboards and mice usually bind to HID.
+Mass-storage devices bind to the USB storage stack and appear as block devices.
+Serial adapters often bind to \cpp|usb-serial|.
+Before writing a custom driver, check whether the hardware really needs one or
+whether it should fit an existing class driver plus a tiny device-specific
+extension.
+
+When a custom driver is needed, it still has choices about its userspace ABI.
+Some USB drivers register a character device node.
+Others integrate with an existing subsystem such as input, tty, networking,
+video4linux, IIO, or sound.
+That subsystem-first approach is usually the right one because it gives the
+device a standard userspace contract instead of inventing a private control
+scheme from scratch.
+
+Sysfs also plays an important role in USB.
+Enumerated devices appear under \verb|/sys/bus/usb/devices/|, where you can
+inspect descriptors, interface numbers, modalias strings, and power-management
+attributes.
+That is often the fastest way to confirm what the kernel thinks the hardware is
+before you write a line of driver code.
+For example:
+\begin{codebash}
+ls /sys/bus/usb/devices/
+cat /sys/bus/usb/devices/1-1/idVendor
+cat /sys/bus/usb/devices/1-1/idProduct
+cat /sys/bus/usb/devices/1-1/modalias
+\end{codebash}
+
+The modalias matters because it is what allows udev and module autoloading to
+connect a newly attached device to the right driver module.
+This is one of the cleanest examples of the kernel device model, bus matching,
+and userspace policy working together.
+
+\subsection{Hotplug, Suspend, and Failure Modes}
+\label{sec:usb_hotplug}
+USB drivers must assume surprise removal.
+Any blocking I/O may be interrupted because the cable was unplugged, a hub reset
+occurred, the device was power-cycled, or the bus suspended and resumed.
+This is why disconnect handling should flip an internal ``device gone'' state
+early, wake sleepers, and make future file operations fail cleanly instead of
+touching freed transport objects.
+
+Power management also matters more on USB than many beginners expect.
+Autosuspend is common on laptops and embedded systems, and a driver that keeps a
+device permanently active without need may waste power or interfere with system
+suspend.
+At the same time, a driver that ignores runtime PM interactions may find that
+its transfers fail unexpectedly after resume.
+The exact hooks depend on the class and kernel subsystem involved, but the
+general rule is stable: device presence and device usability are not the same
+thing on a hotpluggable bus.
+
+For Linux 5.10 and later, the safest mental model is to treat every submitted URB and every
+open userspace handle as potentially concurrent with disconnect.
+Once that assumption becomes part of the design, the rest of the driver tends to
+fall into a healthier shape.
+
+\section{Block Drivers}
+\label{sec:block}
+Block drivers are the foundation for disks, SSDs, loop devices, RAM disks, and
+many storage abstractions that ultimately present sector-oriented I/O to the
+rest of the kernel.
+Conceptually they sit between the generic block layer and the actual transport
+or media implementation.
+Unlike a character driver, a block driver is deeply integrated with caching,
+readahead, filesystem writeback, request merging, partition scanning, and
+storage-specific ordering constraints.
+
+That integration is why block drivers are rarely tiny.
+The driver is not just answering \cpp|read()| and \cpp|write()| calls directly.
+It is participating in a larger pipeline that turns filesystem activity into
+BIOs and requests, schedules those requests, and completes them asynchronously.
+For Linux 5.10 and later, the key abstraction to understand is \textbf{blk-mq}, the
+multi-queue block layer used by modern block drivers.
+
+\subsection{The Modern Block Stack}
+\label{sec:block_stack}
+Older texts often focus on request queues and callback paths that predate
+\cpp|blk-mq|.
+The durable concept is still useful: the kernel aggregates block I/O and hands
+it to the driver in a form that can be scheduled efficiently.
+But the concrete API for new drivers is the multi-queue interface built around
+\cpp|struct blk_mq_tag_set|, \cpp|struct blk_mq_ops|, a request queue created
+from that tag set, and a \cpp|gendisk| object that represents the exported
+disk.
+The helper names vary by kernel vintage: older 5.10-era code often shows
+\cpp|blk_mq_init_sq_queue()| or a separate \cpp|alloc_disk()| path, while newer
+kernels also provide helpers such as \cpp|blk_mq_alloc_disk()|.
+
+The usual lifecycle looks like this:
+\begin{enumerate}
+  \item Allocate and configure the driver's private device state.
+  \item Initialize a blk-mq tag set describing queue depth, hardware queues, and request callbacks.
+  \item Create the request queue from that tag set.
+  \item Allocate a disk object, set its capacity and block-device operations, and attach the queue.
+  \item Publish the disk with \cpp|add_disk()| once the device is actually ready to accept requests.
+\end{enumerate}
+
+On teardown, the order matters just as much.
+The driver must stop new I/O from entering, drain or fail outstanding requests,
+remove the exported disk, and only then free queue-related resources.
+This is another subsystem where lifetime bugs often appear at removal time
+rather than during the happy-path data transfer.
+
+\subsection{BIOs, Requests, and Completion}
+\label{sec:block_io_path}
+At the lower end of the block layer, filesystem and page-cache activity becomes
+BIOs, which describe one or more contiguous ranges of block I/O backed by one
+or more pages.
+The block layer can merge or split those BIOs and eventually hands the driver a
+request object containing the transfer to execute.
+The driver then programs the hardware or software backend and completes the
+request asynchronously when the data has really been transferred.
+
+That means a block driver should think in terms of request completion, not
+``returning bytes''.
+The driver may process multiple requests in parallel, issue them out of order if
+the device semantics permit it, or fail them individually with an error status.
+The correctness boundary is whether the completed request accurately reflects
+what happened on the medium or backend, not whether some userspace syscall has
+already returned.
+
+For software block devices such as RAM disks or loop-like backends, the
+underlying ``hardware'' may simply be memory or another file.
+Even then, it helps to follow the same layered model because that is what keeps
+the code compatible with the generic block layer's expectations around flushing,
+discard, writeback, and queue limits.
+
+\subsection{Queue Limits, Flushes, and Reality}
+\label{sec:block_limits}
+Real storage devices have alignment, segment-count, maximum-transfer, cache, and
+flush semantics that must be communicated to the block layer.
+That is what queue limits are for.
+A driver that lies about those constraints may appear to work under light load
+and then fail badly once filesystems start issuing larger or more varied I/O
+patterns.
+
+Flush and FUA semantics are especially important.
+Filesystems rely on them for persistence guarantees.
+If a device has a volatile write cache, the driver must either implement the
+necessary flush operations correctly or report the capability honestly so higher
+layers can compensate.
+This is one place where a toy block driver can teach the mechanics, but only a
+careful reading of storage semantics makes it production-safe.
+
+Linux 5.10-and-later block drivers also need to fit into the device model and often the DMA
+model discussed earlier.
+NVMe, SCSI HBAs, virtio-blk, and MMC drivers all live at that intersection:
+requests arrive from blk-mq, are translated into transport-specific commands,
+often move data through DMA, and complete back into the generic block layer.
+
+The sample below is intentionally modest: it registers a tiny RAM-backed block
+device with blk-mq and services requests by copying sectors to and from an
+in-memory buffer.
+That keeps the example safe to load in a VM while still showing the modern
+queue setup and request-completion flow.
+Because the block layer helper set changed after Linux v5.10, the sample uses a
+small version guard to select either the older queue-plus-\cpp|alloc_disk()|
+path or the newer \cpp|blk_mq_alloc_disk()| helper:
+
+\samplec{examples/blkram.c}
+
+\section{Network Drivers}
+\label{sec:network}
+Network drivers are different from both character and block drivers because they
+operate on packets, not byte streams or sectors, and because they are tightly
+coupled to the networking stack's queueing, routing, offload, and traffic
+control machinery.
+The central exported object is \cpp|struct net_device|, which represents a
+network interface visible to the rest of the kernel and to userspace tools such
+as \sh|ip| and \sh|ethtool|.
+
+Most Ethernet-style drivers allocate a network device with helpers such as
+\cpp|alloc_etherdev()| or \cpp|alloc_etherdev_mqs()|, store private state behind it with
+\cpp|netdev_priv()|, initialize the operation tables, and register the device
+with \cpp|register_netdev()|.
+Once registered, the interface can be opened, configured, brought up and down,
+and asked to transmit packets by the networking core.
+For compatibility with Linux v5.10 through v6.17 and later, the example below
+uses \cpp|alloc_etherdev()| rather than relying on newer naming or queue-count
+allocation helpers.
+
+\subsection{net\_device and netdev\_ops}
+\label{sec:net_device}
+Modern drivers provide their main callbacks through \cpp|struct net_device_ops|.
+The precise set depends on the device class, but the core operations usually
+include open, stop, start-xmit, MTU changes, and timeout handling.
+On Linux 5.10 and later, this structure is the stable way to hook a driver into the
+networking stack; older callback field names embedded directly in
+\cpp|struct net_device| are mostly historical context.
+
+Bringing an interface up in the open callback usually means enabling interrupts,
+allocating receive buffers, arming DMA rings, and telling the stack the transmit
+queue may start by calling \cpp|netif_start_queue()| or the multi-queue
+equivalent.
+Stopping the interface reverses that process and must ensure that the device can
+no longer DMA into freed memory or complete packets against torn-down state.
+
+Transmit is not a blocking write path.
+The stack gives the driver an \cpp|sk_buff| and expects the driver to queue it
+to hardware quickly or stop the queue temporarily if resources are exhausted.
+Completion typically happens later in interrupt or NAPI context, where the
+driver reclaims descriptors, frees transmitted buffers, updates statistics, and
+wakes the queue if space is available again.
+
+\subsection{Socket Buffers and Receive Paths}
+\label{sec:skb}
+The packet object used throughout the networking stack is \cpp|struct sk_buff|,
+usually called an \cpp|skb|.
+It carries packet data, protocol metadata, checksum information, queue state,
+and references to the underlying memory.
+Driver authors do not need to know every field, but they do need to understand
+the ownership rules: once a transmitted skb is handed to hardware, the driver
+must keep it alive until completion; once a received skb is submitted upward
+into the stack, the stack owns it.
+
+Receive handling is where performance and correctness meet.
+High-rate devices usually keep rings of DMA-backed receive buffers, turn
+completed descriptors into skbs, annotate checksum/VLAN/hash metadata if the
+hardware provided it, and then feed the packets into the stack.
+The stack-facing handoff may use helpers such as \cpp|napi_gro_receive()| or
+related interfaces depending on the driver's receive model and offload support.
+
+The important conceptual point is that packet reception is not just ``copy bytes
+and notify userspace''.
+The driver is cooperating with protocol layers, GRO, checksum offload handling,
+traffic classification, and often XDP or page-pool style buffer recycling on
+newer high-performance paths.
+That is why network drivers tend to be more subsystem-driven than ad hoc.
+
+\subsection{NAPI, Interrupt Moderation, and Throughput}
+\label{sec:napi}
+Classic interrupt-per-packet designs do not scale well.
+Under heavy traffic they spend too much time bouncing in and out of interrupt
+context.
+Linux addresses this with NAPI, which lets a driver disable or defer receive
+interrupts temporarily and poll for batches of packets in softirq context.
+Modern high-performance network drivers almost always rely on NAPI.
+
+In practice, a receive interrupt usually does only enough work to schedule the
+NAPI poll function.
+That poll function then processes packets up to a budget, replenishes receive
+buffers, and re-enables interrupts when the queue has been drained.
+This reduces interrupt overhead while still preserving low latency when the
+system is mostly idle.
+
+NAPI also interacts with queue topology.
+Many devices expose multiple transmit and receive queues so traffic can scale
+across CPUs.
+That is why helpers like \cpp|alloc_etherdev_mqs()| exist and why RSS, XPS, and
+interrupt affinity matter for real drivers.
+Once a driver enters this territory, performance tuning becomes as much about
+queue mapping and cache locality as about the hardware itself.
+
+\subsection{Offloads, Link State, and Userspace}
+\label{sec:net_offloads}
+Network devices often support checksum offload, TSO, GSO, GRO assistance, VLAN
+acceleration, timestamping, and other features.
+The driver advertises these through feature flags on the netdev and must report
+them honestly.
+An incorrect offload declaration is worse than no offload at all because it can
+silently corrupt traffic or confuse higher layers.
+
+Link-state changes also matter.
+The driver should report carrier transitions with helpers such as
+\cpp|netif_carrier_on()| and \cpp|netif_carrier_off()| so the rest of the stack
+and userspace can react appropriately.
+Statistics, coalescing controls, ring sizing, and feature toggles are commonly
+surfaced through ethtool operations rather than a custom ioctl interface.
+That subsystem integration is the network-stack equivalent of using the input or
+block frameworks instead of inventing a private ABI.
+
+The following example registers a virtual Ethernet device and loops transmitted
+packets back into its own receive path.
+It is not a performance driver, but it demonstrates the structure of a modern
+\cpp|net_device| example: \cpp|net_device_ops|, interface bring-up and shutdown,
+skb ownership, and userspace-visible statistics:
+
+\samplec{examples/vnetloop.c}
 
 \section{Standardizing the interfaces: The Device Model}
 \label{sec:device_model}

@@ -37,6 +37,9 @@ obj-m += static_key.o
 obj-m += led.o
 obj-m += dht11.o
 obj-m += devicetree.o
+obj-m += dma.o
+obj-m += blkram.o
+obj-m += vnetloop.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(CURDIR)
