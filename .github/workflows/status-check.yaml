@@ -19,17 +19,26 @@ jobs:
   detect-changes:
     runs-on: ubuntu-24.04
     outputs:
-      examples_changed: ${{ steps.changed-files.outputs.any_changed }}
+      examples_changed: ${{ steps.changed-examples.outputs.any_changed }}
+      devtools_changed: ${{ steps.changed-devtools.outputs.any_changed }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
       - name: Detect changed example files
-        id: changed-files
+        id: changed-examples
         uses: tj-actions/changed-files@v47
         with:
           files: |
             examples/**
             .ci/**
+      - name: Detect changed devtools files
+        id: changed-devtools
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            devtools/**
+            examples/**
+            .ci/non-working
 
   lint:
     needs: detect-changes
@@ -131,12 +140,95 @@ jobs:
           path: ${{ runner.temp }}/status-check-logs
           if-no-files-found: ignore
 
+  devtools-check:
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' ||
+            needs.detect-changes.outputs.devtools_changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
+      - name: Run devtools offline checks
+        run: devtools/check.sh
+
+  devtools-qemu:
+    needs:
+      - detect-changes
+      - devtools-check
+    if: ${{ github.event_name == 'workflow_dispatch' ||
+            needs.detect-changes.outputs.devtools_changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc flex bison libelf-dev libssl-dev \
+            cpio qemu-system-x86
+      - name: Restore kernel source cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            devtools/.cache/linux-*.tar.xz
+            devtools/.cache/linux-*/
+          key: devtools-kernel-src-${{ runner.os }}-${{ hashFiles('devtools/config.defaults') }}
+      - name: Restore kernel build cache
+        uses: actions/cache@v5
+        with:
+          path: devtools/.cache/kernel-build
+          key: devtools-kernel-build-${{ runner.os }}-${{ hashFiles('devtools/config.defaults', 'devtools/kernel.config') }}
+          restore-keys: |
+            devtools-kernel-build-${{ runner.os }}-
+      - name: Restore busybox cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            devtools/.cache/busybox-*.tar.bz2
+            devtools/.cache/busybox-*/
+          key: devtools-busybox-${{ runner.os }}-${{ hashFiles('devtools/config.defaults') }}
+      - name: Restore initramfs cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            devtools/.cache/initramfs
+            devtools/.cache/initramfs.cpio.gz
+            devtools/.cache/.initramfs-stamp
+          key: devtools-initramfs-${{ runner.os }}-${{ hashFiles('devtools/config.defaults', 'devtools/initramfs/init') }}
+      - name: Build kernel and initramfs
+        run: devtools/setup.sh
+      - name: Build kernel modules
+        run: devtools/build-modules.sh
+      - name: Run QEMU module tests
+        timeout-minutes: 10
+        run: devtools/test-modules.sh --no-build
+      - name: Collect guest log
+        if: failure()
+        run: |
+          mkdir -p "${{ runner.temp }}/devtools-logs"
+          sudo dmesg --color=never | tail -n 200 \
+            > "${{ runner.temp }}/devtools-logs/dmesg.log" 2>/dev/null || true
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: devtools-qemu-logs
+          path: ${{ runner.temp }}/devtools-logs
+          if-no-files-found: ignore
+
   validate:
     needs:
       - detect-changes
       - lint
       - static-analysis
       - build-and-run
+      - devtools-check
+      - devtools-qemu
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
@@ -146,18 +238,31 @@ jobs:
           result_lint="${{ needs.lint.result }}"
           result_sa="${{ needs.static-analysis.result }}"
           result_bar="${{ needs.build-and-run.result }}"
-          changed="${{ needs.detect-changes.outputs.examples_changed }}"
+          result_check="${{ needs.devtools-check.result }}"
+          result_qemu="${{ needs.devtools-qemu.result }}"
+          examples_changed="${{ needs.detect-changes.outputs.examples_changed }}"
+          devtools_changed="${{ needs.detect-changes.outputs.devtools_changed }}"
 
           if [[ "${result_detect}" != "success" ]]; then
             echo "Change-detection job did not succeed: ${result_detect}"
             exit 1
           fi
 
-          # When examples changed (or manual dispatch), jobs must succeed
-          if [[ "${changed}" == "true" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          # When examples changed (or manual dispatch), lint/analysis/build jobs must succeed
+          if [[ "${examples_changed}" == "true" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             for r in "${result_lint}" "${result_sa}" "${result_bar}"; do
               if [[ "${r}" != "success" ]]; then
                 echo "Required job did not succeed: ${r}"
+                exit 1
+              fi
+            done
+          fi
+
+          # When devtools or examples changed (or manual dispatch), devtools jobs must succeed
+          if [[ "${devtools_changed}" == "true" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            for r in "${result_check}" "${result_qemu}"; do
+              if [[ "${r}" != "success" ]]; then
+                echo "devtools job did not succeed: ${r}"
                 exit 1
               fi
             done

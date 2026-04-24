@@ -1,0 +1,29 @@
+# devtools/config.defaults -- default configuration for QEMU-based kernel module testing
+# Override any variable by creating devtools/config.local (gitignored).
+
+# Kernel source
+KERNEL_VERSION="${KERNEL_VERSION:-6.12.6}"
+KERNEL_MAJOR="${KERNEL_VERSION%%.*}"
+KERNEL_URL_PRIMARY="https://cdn.kernel.org/pub/linux/kernel/v${KERNEL_MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz"
+KERNEL_URL_GITHUB="https://github.com/gregkh/linux/archive/refs/tags/v${KERNEL_VERSION}.tar.gz"
+
+# Busybox (statically linked for initramfs)
+BUSYBOX_VERSION="${BUSYBOX_VERSION:-1.37.0}"
+BUSYBOX_URL="https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2"
+
+# Build paths (all under .cache to keep project root clean)
+CACHE_DIR="${CACHE_DIR:-$DEVTOOLS_DIR/.cache}"
+KERNEL_SRC="$CACHE_DIR/linux-${KERNEL_VERSION}"
+KERNEL_BUILD="$CACHE_DIR/kernel-build"
+BUSYBOX_SRC="$CACHE_DIR/busybox-${BUSYBOX_VERSION}"
+INITRAMFS_DIR="$CACHE_DIR/initramfs"
+INITRAMFS_CPIO="$CACHE_DIR/initramfs.cpio.gz"
+
+# QEMU
+QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
+QEMU_MEM="${QEMU_MEM:-512M}"
+QEMU_SMP="${QEMU_SMP:-2}"
+QEMU_GDB_PORT="${QEMU_GDB_PORT:-1234}"
+
+# Project paths
+EXAMPLES_DIR="$PROJECT_ROOT/examples"

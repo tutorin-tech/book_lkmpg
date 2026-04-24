@@ -167,8 +167,17 @@ lsmod | grep fat
 \subsection{Is there a need to download and compile the kernel?}
 \label{sec:buildkernel}
 To effectively follow this guide, there is no obligatory requirement for performing such actions.
-Nonetheless, a prudent approach involves executing the examples within a test distribution on a virtual machine,
+Nonetheless, a prudent approach involves executing the examples within an isolated environment,
 thus mitigating any potential risk of disrupting the system.
+
+This guide includes a \verb|devtools/| directory that automates kernel module testing
+inside a QEMU virtual machine.
+It downloads a kernel source tree and a minimal BusyBox root filesystem, builds both,
+and boots the result in QEMU with the host \verb|examples/| directory shared into the
+guest via the 9p virtfs protocol.
+You edit source files on your host and \sh|insmod| the compiled modules in the guest---no
+disk images to manage, no root filesystem to rebuild.
+See \Cref{sec:devtools_setup} for the complete setup procedure.
 
 \subsection{Before We Begin}
 \label{sec:preparation}
@@ -214,9 +223,101 @@ It is reassuring to note that overcoming the initial obstacle on the first attem
         more detailed steps for \href{https://wiki.debian.org/SecureBoot}{SecureBoot} can be explored and followed.
 \end{enumerate}
 
+\subsection{QEMU-Based Development Environment}
+\label{sec:devtools_setup}
+An alternative to installing kernel headers on your host and loading modules
+into your running kernel is to use the QEMU-based development environment
+provided under \verb|devtools/|.
+This approach is especially useful on machines where you cannot (or prefer not to)
+load arbitrary kernel modules---for example, hosts with SecureBoot enabled, corporate
+laptops, or macOS workstations.
+
+The setup compiles a minimal Linux kernel with module, debugfs, procfs, and 9p
+filesystem support, along with a statically linked BusyBox initramfs.
+QEMU boots this kernel and shares the project directory into the guest via the 9p
+virtfs protocol, so every file you edit on the host is immediately visible inside the
+virtual machine.
+
+\textbf{Prerequisites.}
+The kernel and BusyBox builds require a Linux host (or a Linux environment such as
+Docker or \href{https://lima-vm.io/}{Lima} on macOS).
+QEMU itself runs natively on Linux and macOS.
+
+\begin{codebash}
+# Debian/Ubuntu: install the build toolchain and QEMU
+sudo apt-get install build-essential flex bison bc libelf-dev libssl-dev cpio qemu-system-x86
+
+# macOS: install QEMU (kernel build runs inside Lima or Docker)
+brew install qemu
+\end{codebash}
+
+\textbf{One-time setup} (downloads a kernel tarball and BusyBox, builds both, and
+packs an initramfs):
+\begin{codebash}
+devtools/setup.sh
+\end{codebash}
+
+\textbf{Building modules} against the QEMU kernel (must be run on Linux):
+\begin{codebash}
+devtools/build-modules.sh
+\end{codebash}
+
+\textbf{Interactive testing.}
+Boot QEMU and get a shell inside the guest.
+The project tree is mounted at \verb|/mnt/lkmpg/|, with compiled modules at
+\verb|/mnt/lkmpg/examples/*.ko|:
+\begin{codebash}
+devtools/boot.sh
+# Inside the guest:
+insmod /mnt/lkmpg/examples/hello-1.ko
+dmesg | tail
+rmmod hello_1
+\end{codebash}
+
+\textbf{Automated testing.}
+Build all modules and run \sh|insmod|/\sh|rmmod| for every module in a single
+command.
+Modules listed in \verb|.ci/non-working| are automatically skipped:
+\begin{codebash}
+devtools/test-modules.sh
+\end{codebash}
+
+\textbf{Kernel debugging with GDB.}
+GDB requires the \verb|vmlinux| image with debug symbols.
+Prebuilt setups omit it for size; rebuild from source first:
+\begin{codebash}
+LKMPG_NO_PREBUILT=1 devtools/setup.sh
+\end{codebash}
+
+Then start QEMU paused and attach GDB from a second terminal:
+\begin{codebash}
+# Terminal 1: QEMU waits for a debugger connection
+devtools/boot.sh --gdb
+
+# Terminal 2: connect GDB
+gdb devtools/.cache/kernel-build/vmlinux \
+    -ex "target remote :1234" \
+    -ex "break do_init_module" \
+    -ex continue
+\end{codebash}
+When you \sh|insmod| a module in the guest, GDB will break at the module
+initialization entry point.
+
+\textbf{Overriding defaults.}
+Create \verb|devtools/config.local| (gitignored) to change the kernel version,
+QEMU memory size, or other settings:
+\begin{code}
+KERNEL_VERSION="6.6.70"
+QEMU_MEM="1G"
+\end{code}
+Rerun \verb|devtools/setup.sh| after changing \verb|KERNEL_VERSION|.
+
 \section{Kernel Headers}
 \label{sec:headers}
 Before building anything, it is necessary to install the header files for the kernel.
+If you are using the QEMU-based environment described in \Cref{sec:devtools_setup},
+the kernel headers are built automatically by \verb|devtools/setup.sh| and you can
+skip this step.
 
 On Ubuntu/Debian GNU/Linux:
 \begin{codebash}
@@ -243,6 +344,18 @@ sudo dnf install kernel-devel kernel-headers
 \section{Examples}
 \label{sec:examples}
 All the examples from this document are available within the \verb|examples| subdirectory.
+
+To build all examples at once, run \sh|make| from within the \verb|examples/| directory
+(requires kernel headers installed, see \Cref{sec:headers}), or use the QEMU-based
+environment:
+\begin{codebash}
+devtools/build-modules.sh
+\end{codebash}
+
+To run automated \sh|insmod|/\sh|rmmod| tests for every module inside QEMU:
+\begin{codebash}
+devtools/test-modules.sh
+\end{codebash}
 
 Should compile errors occur, it may be due to a more recent kernel version being in use,
 or there might be a need to install the corresponding kernel header files.
@@ -418,6 +531,18 @@ Alternatively, you can check the systemd journal for kernel messages:
 \begin{codebash}
 journalctl --since "1 hour ago" | grep kernel
 \end{codebash}
+
+If you are using the QEMU environment from \Cref{sec:devtools_setup} instead, the
+same exercise looks like this:
+\begin{codebash}
+devtools/build-modules.sh        # compile all examples
+devtools/boot.sh                 # boot into the QEMU guest
+# inside the guest:
+insmod /mnt/lkmpg/examples/hello-1.ko
+dmesg | tail
+rmmod hello_1
+\end{codebash}
+No \sh|sudo| is needed because the guest runs as root.
 
 You now know the basics of creating, compiling, installing and removing modules.
 Now for more of a description of how this module works.
@@ -711,8 +836,10 @@ Obviously, we strongly suggest you to recompile your kernel, so that you can ena
 such as forced module unloading (\cpp|MODULE_FORCE_UNLOAD|): when this option is enabled,
 you can force the kernel to unload a module even when it believes it is unsafe, via a \sh|sudo rmmod -f module| command.
 This option can save you a lot of time and a number of reboots during the development of a module.
-If you do not want to recompile your kernel then you should consider running the examples within a test distribution on a virtual machine.
-If you mess anything up then you can easily reboot or restore the virtual machine (VM).
+If you do not want to recompile your kernel then you should consider using the QEMU-based
+environment described in \Cref{sec:devtools_setup}, which already enables
+\cpp|MODULE_FORCE_UNLOAD| and other debugging options in its kernel configuration.
+If you mess anything up inside the guest you can simply close and reboot the virtual machine.
 
 There are a number of cases in which you may want to load your module into a precompiled running kernel,
 such as the ones shipped with common Linux distributions, or a kernel you have compiled in the past.
@@ -3267,6 +3394,7 @@ Testing Device Tree modules can be done in several ways:
   \item \textbf{Modifying the main Device Tree}: Add your device nodes to the system's main Device Tree source file and recompile it.
 
   \item \textbf{Using QEMU}: For development and testing, QEMU can emulate systems with custom Device Trees, allowing you to test your modules without physical hardware.
+        The \verb|devtools/boot.sh| script (see \Cref{sec:devtools_setup}) provides a ready-made QEMU environment where you can load and test modules interactively.
 \end{enumerate}
 
 To check if your device was properly detected, you can examine the sysfs filesystem:
