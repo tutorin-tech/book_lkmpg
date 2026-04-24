@@ -7,9 +7,9 @@ if [ ${#SOURCES[@]} -eq 0 ]; then
     exit 0
 fi
 
-CLANG_FORMAT=$(command -v clang-format)
+CLANG_FORMAT=$(command -v clang-format-20 || command -v clang-format || true)
 if [ -z "${CLANG_FORMAT}" ]; then
-    echo "[!] clang-format not installed. Unable to check source file format policy." >&2
+    echo "[!] clang-format not installed. Install clang-format-20 or clang-format." >&2
     exit 1
 fi
 
