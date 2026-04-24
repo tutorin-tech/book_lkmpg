@@ -1,0 +1,128 @@
+name: devtools-release
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'devtools/config.defaults'
+      - 'devtools/kernel.config'
+      - 'devtools/initramfs/init'
+      - 'devtools/setup.sh'
+      - 'devtools/pack-prebuilt.sh'
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: devtools-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc flex bison libelf-dev libssl-dev \
+            cpio rsync
+
+      - name: Compute release tag
+        id: tag
+        run: |
+          . devtools/config.defaults
+          case "$(uname -m)" in
+            x86_64|amd64) HOST_ARCH=x86_64 ;;
+            aarch64|arm64) HOST_ARCH=arm64 ;;
+            *) HOST_ARCH=$(uname -m) ;;
+          esac
+          HASH=$(cat \
+            devtools/kernel.config \
+            devtools/config.defaults \
+            devtools/initramfs/init \
+            devtools/setup.sh \
+            devtools/pack-prebuilt.sh \
+            2>/dev/null | sha256sum | cut -c1-8)
+          TAG="devtools-v${KERNEL_VERSION}-${HOST_ARCH}-${HASH}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "kernel_version=$KERNEL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "host_arch=$HOST_ARCH" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
+      - name: Check if release already exists
+        id: existing
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.tag.outputs.tag }} already exists, skipping build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore kernel source cache
+        if: steps.existing.outputs.exists == 'false'
+        uses: actions/cache@v5
+        with:
+          path: |
+            devtools/.cache/linux-*.tar.xz
+            devtools/.cache/linux-*/
+          key: devtools-kernel-src-${{ runner.os }}-${{ hashFiles('devtools/config.defaults') }}
+
+      - name: Restore kernel build cache
+        if: steps.existing.outputs.exists == 'false'
+        uses: actions/cache@v5
+        with:
+          path: devtools/.cache/kernel-build
+          key: devtools-kernel-build-${{ runner.os }}-${{ steps.tag.outputs.host_arch }}-${{ hashFiles('devtools/config.defaults', 'devtools/kernel.config') }}
+
+      - name: Restore busybox cache
+        if: steps.existing.outputs.exists == 'false'
+        uses: actions/cache@v5
+        with:
+          path: |
+            devtools/.cache/busybox-*.tar.bz2
+            devtools/.cache/busybox-*/
+          key: devtools-busybox-${{ runner.os }}-${{ hashFiles('devtools/config.defaults') }}
+
+      - name: Build kernel and initramfs
+        if: steps.existing.outputs.exists == 'false'
+        run: devtools/setup.sh
+
+      - name: Pack prebuilt tarball
+        if: steps.existing.outputs.exists == 'false'
+        run: devtools/pack-prebuilt.sh
+
+      - name: Publish release
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          KVER="${{ steps.tag.outputs.kernel_version }}"
+          TARBALL=$(ls devtools/.cache/lkmpg-prebuilt-*.tar.xz)
+
+          gh release create "$TAG" "$TARBALL" \
+            --title "devtools: kernel $KVER prebuilt (${{ steps.tag.outputs.host_arch }})" \
+            --notes "$(cat <<EOF
+          Prebuilt kernel build output for lkmpg devtools.
+
+          - Kernel: $KVER
+          - Host arch: ${{ steps.tag.outputs.host_arch }}
+          - Inputs hash: $(echo "$TAG" | sed 's/.*-//')
+          - Contents: bzImage, kbuild headers/scripts, initramfs
+
+          Used automatically by \`devtools/setup.sh\` to skip the ~15 min kernel build.
+          The kernel source tarball is still downloaded from kernel.org (required for out-of-tree module compilation).
+          vmlinux is not included; rebuild from source for GDB debugging.
+          EOF
+          )" \
+            --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

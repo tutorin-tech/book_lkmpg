@@ -1,0 +1,54 @@
+#!/bin/sh
+# PID 1 init for lkmpg QEMU guest.
+# Mounts essential filesystems, shares host project root via 9p, and either
+# drops to an interactive shell or runs a test command from the kernel cmdline.
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+mount -t tmpfs tmpfs /tmp
+
+# Mount host project root via 9p virtfs
+mkdir -p /mnt/lkmpg
+if ! mount -t 9p -o trans=virtio,version=9p2000.L lkmpg /mnt/lkmpg 2>/dev/null; then
+    echo "WARNING: 9p mount failed. /mnt/lkmpg/ will be empty."
+    echo "Make sure QEMU was launched with -virtfs for lkmpg."
+fi
+
+# Parse kernel command line for test mode.
+# boot.sh passes the command as base64 via lkmpg.cmd64= to survive
+# kernel cmdline word-splitting. Decode here before execution.
+TESTCMD=""
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        lkmpg.cmd64=*) TESTCMD=$(echo "${arg#lkmpg.cmd64=}" | base64 -d) ;;
+    esac
+done
+
+if [ -n "$TESTCMD" ]; then
+    echo "=== lkmpg test mode ==="
+    /bin/sh -c "$TESTCMD"
+    RESULT=$?
+    echo "=== test exited with code $RESULT ==="
+    # Halt the VM; QEMU -no-reboot ensures it terminates.
+    poweroff -f
+    exit "$RESULT"
+fi
+
+# Interactive mode
+echo "================================================"
+echo "  lkmpg QEMU guest"
+echo "  Project:  /mnt/lkmpg/"
+echo "  Modules:  /mnt/lkmpg/examples/*.ko"
+echo "  Example:  insmod /mnt/lkmpg/examples/hello-1.ko"
+echo "            dmesg | tail"
+echo "            rmmod hello_1"
+echo "  Exit:     poweroff"
+echo "================================================"
+export PS1='lkmpg:\w# '
+exec /bin/sh

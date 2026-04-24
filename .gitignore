@@ -40,3 +40,7 @@ lkmpg.synctex.gz
 
 # format checks
 expected-format
+
+# devtools build cache and local overrides
+devtools/.cache/
+devtools/config.local
