@@ -223,14 +223,27 @@ It is reassuring to note that overcoming the initial obstacle on the first attem
         more detailed steps for \href{https://wiki.debian.org/SecureBoot}{SecureBoot} can be explored and followed.
 \end{enumerate}
 
+If you are building your own kernel for module development, these \verb|.config| options are useful for debugging and development:
+\begin{itemize}
+  \item \cpp|CONFIG_DEBUG_INFO|: include debug symbols so \sh|gdb|, \sh|addr2line|, and \sh|objdump| can map crash addresses to source lines.
+  \item \cpp|CONFIG_DYNAMIC_DEBUG|: enable runtime-switchable \cpp|pr_debug()| statements (see \Cref{sec:printk}).
+  \item \cpp|CONFIG_KASAN| (Kernel Address Sanitizer): instruments memory accesses to detect out-of-bounds, use-after-free, and other memory errors at the cost of roughly 2$\times$ memory usage and some CPU overhead.
+  \item \cpp|CONFIG_LOCKDEP| (lock dependency checker): detects potential deadlocks (lock order inversions, sleeping under spinlocks, wrong lock type for context) at runtime, before they actually hang the system.
+  \item \cpp|CONFIG_DEBUG_ATOMIC_SLEEP|: flags attempts to sleep in atomic context, catching the most common spinlock misuse.
+  \item \cpp|CONFIG_MODULE_FORCE_UNLOAD|: allows \sh|rmmod -f| as a last resort during development, but use it with care because force-unloading can hide lifetime bugs and leave the kernel in an inconsistent state.
+\end{itemize}
+The QEMU-based environment described below already enables
+\cpp|CONFIG_DEBUG_INFO| and \cpp|CONFIG_MODULE_FORCE_UNLOAD|; enable the
+others explicitly if you want those extra diagnostics.
+
 \subsection{QEMU-Based Development Environment}
 \label{sec:devtools_setup}
 An alternative to installing kernel headers on your host and loading modules
 into your running kernel is to use the QEMU-based development environment
 provided under \verb|devtools/|.
 This approach is especially useful on machines where you cannot (or prefer not to)
-load arbitrary kernel modules---for example, hosts with SecureBoot enabled, corporate
-laptops, or macOS workstations.
+load arbitrary kernel modules (for example, hosts with SecureBoot enabled, corporate
+laptops, or macOS workstations).
 
 The setup compiles a minimal Linux kernel with module, debugfs, procfs, and 9p
 filesystem support, along with a statically linked BusyBox initramfs.
@@ -582,6 +595,21 @@ We needed to include \src{include/linux/printk.h} only for the macro expansion f
         \textbf{Important:} These functions write to the kernel log ring buffer, \emph{not} directly to any terminal or console.
         To view the output from your kernel modules, you must use \sh|dmesg| or \sh|journalctl -k|.
 
+        The kernel log buffer is a fixed-size circular buffer (sized via \cpp|CONFIG_LOG_BUF_SHIFT| in the kernel configuration).
+        Excessive logging can overflow the buffer and push out earlier messages before they are read.
+        In hot paths (interrupt handlers, per-packet processing, or tight loops), use the rate-limited variants \cpp|pr_info_ratelimited()|, \cpp|pr_warn_ratelimited()|, etc., or the explicit \cpp|printk_ratelimit()| guard, to avoid flooding the log and slowing down the system due to console output overhead.
+        See \src{include/linux/ratelimit.h} for details.
+
+        For development, \cpp|pr_debug()| is particularly useful.
+        When the kernel is compiled with \cpp|CONFIG_DYNAMIC_DEBUG|, \cpp|pr_debug()| calls are compiled in but disabled by default.
+        You can selectively enable them at runtime without recompiling or reloading the module by writing to \verb|/sys/kernel/debug/dynamic_debug/control|:
+        \begin{codebash}
+echo "module mymodule +p" > /sys/kernel/debug/dynamic_debug/control
+        \end{codebash}
+        The \verb|+p| flag activates printing; \verb|-p| disables it.
+        You can filter by file, function, or line number.
+        See \src{Documentation/admin-guide/dynamic-debug-howto.rst} for the full syntax.
+
   \item About Compiling.
         Kernel modules need to be compiled a bit differently from regular userspace apps.
         Former kernel versions required us to care much about these settings, which are usually stored in Makefiles.
@@ -774,7 +802,10 @@ Goodbye, world 5
 
 $ sudo insmod hello-5.ko mylong=hello
 insmod: ERROR: could not insert module hello-5.ko: Invalid parameters
+\end{verbatim}
 
+% break for proper layout
+\begin{verbatim}
 $ sudo insmod hello-6.ko watched=7
 $ sudo dmesg -t | tail -3
 watched updated to 7
@@ -861,7 +892,11 @@ kernel: poet: disagrees about version of symbol module_layout
 \end{verbatim}
 
 In other words, your kernel refuses to accept your module because version strings (more precisely, \textit{version magic}, see \src{include/linux/vermagic.h}) do not match.
-Incidentally, version magic strings are stored in the module object in the form of a static string, starting with \cpp|vermagic:|.
+The version magic string encodes the kernel version, the SMP configuration, preemption model, and other build flags that affect the kernel ABI.
+When you \sh|insmod| a module, the kernel compares the module's version magic against its own; any mismatch means the module was compiled for a different kernel configuration and loading it could corrupt kernel data structures.
+Additionally, if \cpp|CONFIG_MODVERSIONS| is enabled, each exported symbol carries a CRC checksum of its prototype. A module will be rejected if any symbol signature changed between the kernel it was compiled against and the one it is being loaded into.
+
+Version magic strings are stored in the module object in the form of a static string, starting with \cpp|vermagic:|.
 Version data are inserted in your module when it is linked against the \verb|kernel/module.o| file.
 To inspect version magics and other strings stored in a given module, issue the command \sh|modinfo module.ko|:
 
@@ -953,6 +988,58 @@ While there are multiple methods to define these functions, the terms ``entry fu
 However, they may occasionally be referred to as \cpp|init_module| and \cpp|cleanup_module|,
 which are understood to mean the same.
 
+\subsubsection{Error handling during initialization}
+\label{sec:init_error_handling}
+Registration and allocation calls in the init function can fail.
+Every resource acquired must be released on error, otherwise the system leaks memory or, worse, becomes unstable.
+The canonical kernel pattern uses \cpp|goto|-based cleanup in reverse allocation order:
+
+\begin{code}
+static int __init my_init(void)
+{
+    int err;
+
+    err = register_A();
+    if (err)
+        return err;
+
+    err = register_B();
+    if (err)
+        goto undo_A;
+
+    err = register_C();
+    if (err)
+        goto undo_B;
+
+    return 0;
+
+undo_B:
+    unregister_B();
+undo_A:
+    unregister_A();
+    return err;
+}
+\end{code}
+
+This pattern avoids deeply nested \cpp|if|/\cpp|else| blocks and guarantees that resources are freed in the exact reverse order of acquisition.
+Always return a proper negative error code defined in \src{include/linux/errno.h} (e.g.\ \cpp|-ENOMEM|, \cpp|-ENODEV|) so that \sh|insmod| can report a meaningful error.
+
+Some kernel functions encode errors directly in the returned pointer value rather than returning \cpp|NULL|.
+Functions documented to use this convention (e.g.\ \cpp|class_create()|) return values produced by \cpp|ERR_PTR()|.
+The macros \cpp|IS_ERR()|, \cpp|PTR_ERR()|, and \cpp|ERR_PTR()| (from \src{include/linux/err.h}) handle this:
+\cpp|ERR_PTR(-ENOMEM)| converts an error code into a pointer,
+\cpp|IS_ERR(ptr)| tests whether a returned pointer is actually an encoded error,
+and \cpp|PTR_ERR(ptr)| extracts the negative error code.
+Not all pointer-returning APIs use this convention; for example, \cpp|proc_create()|, \cpp|kmalloc()|, and \cpp|kzalloc()| return plain \cpp|NULL| on failure.
+Always check the documentation of the specific function to know which error convention it follows.
+
+\subsubsection{Module-loading races}
+\label{sec:init_races}
+Once you register a callback structure with the kernel (e.g.\ a \cpp|file_operations| via \cpp|cdev_add()| or a \verb|/proc| entry via \cpp|proc_create()|), user space can invoke those callbacks immediately, even before the init function returns.
+Therefore, complete all internal initialization before registering any callback-bearing structure.
+If registration is the first thing init does and some later step fails, the cleanup path may race with an in-progress callback.
+The rule of thumb: register last, unregister first.
+
 \subsection{Functions available to modules}
 \label{sec:avail_func}
 Programmers use functions they do not define all the time.
@@ -1017,6 +1104,40 @@ Recall the discussion about library functions vs system calls.
 Typically, you use a library function in user mode.
 The library function calls one or more system calls, and these system calls execute on the library function's behalf, but do so in supervisor mode since they are part of the kernel itself.
 Once the system call completes its task, it returns and execution gets transferred back to user mode.
+
+Kernel code begins executing in response to one of three events: system calls, hardware interrupts, or processor exceptions (traps).
+System calls are the usual user-to-kernel transition, initiated by a running process.
+Interrupts and exceptions may arrive while the CPU is already in kernel mode, so they are not strictly user-to-kernel crossings; they are entries into new kernel execution contexts.
+Understanding these distinctions matters because each context places different constraints on what a module may do.
+
+\subsubsection{Concurrency in the kernel}
+\label{sec:kernel_concurrency}
+Unlike a single-threaded user-space program, kernel code is inherently concurrent.
+Multiple CPUs may execute kernel paths simultaneously, hardware interrupts can preempt process context at any time, and the scheduler may preempt kernel code on \verb|PREEMPT|-enabled kernels.
+This means that any shared data structure must be protected by appropriate synchronization primitives (see \Cref{sec:synchronization}).
+
+Each CPU has exactly one ``current'' process at any given moment, accessible via the \cpp|current| macro.
+When your module code runs in process context (e.g.\ a system call or a file operation callback), \cpp|current| points to the \cpp|struct task_struct| of the process that triggered the call.
+In interrupt context, \cpp|current| is technically still valid but refers to whichever process happened to be running when the interrupt fired; it is meaningless for your handler's logic and should not be used.
+
+The table below summarizes what is allowed in each execution context.
+Getting this wrong is one of the most common sources of kernel bugs.
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+Operation & Process ctx & Softirq/tasklet ctx & Hardirq ctx \\
+\hline
+Sleep / schedule                              & Yes & No  & No  \\
+Access user memory (\texttt{copy\_to\_user}) & Yes & No  & No  \\
+\texttt{kmalloc(GFP\_KERNEL)}                & Yes & No  & No  \\
+\texttt{kmalloc(GFP\_ATOMIC)}                & Yes & Yes & Yes \\
+Acquire mutex                                & Yes & No  & No  \\
+Acquire spinlock                             & Yes & Yes & Yes \\
+\texttt{current} pointer meaningful          & Yes & No  & No  \\
+\hline
+\end{tabular}
+\end{center}
 
 \subsection{Name Space}
 \label{sec:namespace}
@@ -1241,6 +1362,13 @@ Resist the temptation.
 Go ahead and look at the definition of file.
 Most of the entries you see, like struct dentry, are not used by device drivers, and you can ignore them.
 This is because drivers do not fill file directly; they only use structures contained in file which are created elsewhere.
+
+One subtlety worth noting: the \cpp|open| callback is called once for every \cpp|open()| system call,
+but \cpp|release| is called only when the last file descriptor referring to that \cpp|struct file| is closed.
+If a process calls \cpp|dup()| or \cpp|fork()|, multiple file descriptors share the same \cpp|struct file|;
+\cpp|release| is deferred until all of them are gone.
+The \cpp|flush| callback, by contrast, is invoked on every \cpp|close()|.
+The \cpp|private_data| field of \cpp|struct file| is the standard place to attach per-open state allocated in \cpp|open| and freed in \cpp|release|.
 
 \subsection{Registering A Device}
 \label{sec:register_device}
@@ -1527,6 +1655,22 @@ You can find sysfs directories and files under the \verb|/sys| directory on your
 \begin{codebash}
 ls -l /sys
 \end{codebash}
+
+Unlike \verb|/proc|, which grew organically and mixes process information with driver knobs, sysfs is tightly tied to the kernel's device model and provides multiple coherent views of the same hardware:
+
+\begin{itemize}
+  \item \verb|/sys/devices/|: the actual device tree, rooted at the platform/CPU level.
+  \item \verb|/sys/bus/|: one subdirectory per bus type (PCI, USB, I2C, platform, \dots), each containing \verb|devices/| and \verb|drivers/| subdirectories. Entries under \verb|devices/| are symlinks back into \verb|/sys/devices/|.
+  \item \verb|/sys/class/|: devices grouped by function (net, block, input, tty, \dots) regardless of what bus they sit on.
+  \item \verb|/sys/module/|: one directory per module (including built-in ones), exposing parameters and, for loadable modules, reference count.
+  \item \verb|/sys/kernel/|: miscellaneous kernel-wide tunables.
+  \item \verb|/sys/firmware/|: firmware and ACPI/device-tree data.
+  \item \verb|/sys/power/|: power-management state.
+\end{itemize}
+
+Every directory in sysfs corresponds to a \cpp|struct kobject| in the kernel.
+Files inside those directories are kobject attributes; read or write operations on them invoke \cpp|show()| or \cpp|store()| callbacks inside the driver.
+This one-value-per-file convention keeps the interface simple and scriptable compared to the free-form output of many \verb|/proc| entries.
 
 Attributes can be exported for kobjects in the form of regular files in the filesystem.
 Sysfs forwards file I/O operations to methods defined for the attributes, providing a means to read and write kernel attributes.
@@ -2118,6 +2262,27 @@ If you genuinely need hard interrupts disabled, use the \cpp|raw_spin_lock_irqsa
 Next, \cpp|spin_lock_bh()| disables \textbf{softirqs} (software interrupts) but allows hardware interrupts to continue.
 Unlike \cpp|spin_lock_irq()| and \cpp|spin_lock_irqsave()|, which disable both hardware and software interrupts, \cpp|spin_lock_bh()| is useful when hardware interrupts need to remain active.
 
+A common deadlock scenario illustrates why the right variant matters.
+Suppose process-context code acquires a spinlock with plain \cpp|spin_lock()|, then a hardware interrupt fires on the same CPU.
+The interrupt handler tries to acquire the same lock and spins forever, because the CPU that holds the lock is the same CPU that needs to release it, but it is stuck in the interrupt handler.
+The solution: use \cpp|spin_lock_irqsave()| in the process-context path so that local interrupts are disabled while the lock is held.
+A hardirq top-half handler can normally use plain \cpp|spin_lock()| for that lock because local interrupts are already disabled on entry.
+Threaded IRQ handlers (registered with \cpp|request_threaded_irq()|) run in process context and follow process-context locking rules instead.
+The quick reference:
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+Data shared between \dots & Recommended primitive \\
+\hline
+Process context only               & \texttt{spin\_lock()} / \texttt{mutex\_lock()} \\
+Process and softirq/tasklet        & \texttt{spin\_lock\_bh()} \\
+Process and hardirq                & \texttt{spin\_lock\_irqsave()} \\
+Hardirq and softirq                & \texttt{spin\_lock\_irqsave()} (in softirq) \\
+\hline
+\end{tabular}
+\end{center}
+
 For more information about spinlock usage and lock types, see the following resources:
 \begin{itemize}
   \item \href{https://www.kernel.org/doc/Documentation/locking/spinlocks.txt}{Lesson 1: Spin locks}
@@ -2222,9 +2387,9 @@ The following source code illustrates a minimal kernel module which, when loaded
 \samplec{examples/kbleds.c}
 
 If none of the examples in this chapter fit your debugging needs, there might yet be some other tricks to try.
-Ever wondered what \cpp|CONFIG_LL_DEBUG| in \sh|make menuconfig| is good for?
+Ever wondered what \cpp|CONFIG_DEBUG_LL| in \sh|make menuconfig| is good for?
 If you activate that you get low level access to the serial port.
-While this might not sound very powerful by itself, you can patch \src{kernel/printk.c} or any other essential syscall to print ASCII characters, thus making it possible to trace virtually everything what your code does over a serial line.
+While this might not sound very powerful by itself, you can patch \src{kernel/printk/printk.c} or any other essential kernel function to print ASCII characters, thus making it possible to trace virtually everything what your code does over a serial line.
 If you find yourself porting the kernel to some new and former unsupported architecture, this is usually amongst the first things that should be implemented.
 Logging over a netconsole might also be worth a try.
 
@@ -2340,6 +2505,20 @@ It may fault, it may refer to memory that disappears after rescheduling, and it
 must only be touched through the \cpp|copy_to_user()|, \cpp|copy_from_user()|,
 \cpp|get_user()|, and \cpp|put_user()| families or other APIs that explicitly
 document \cpp|__user| handling.
+
+Dereferencing a user pointer directly (e.g.\ \cpp|*ubuf|) is never correct, even
+if the address looks valid.
+The kernel cannot simply trap a page fault the way a user process does: an
+unhandled fault in kernel mode triggers an oops or a panic.
+The \cpp|copy_from_user()| family works because each potentially faulting
+instruction is recorded in a compiler-generated \emph{exception table}.
+When a page fault occurs at one of those recorded addresses, the fault handler
+redirects execution to a fixup path that returns \cpp|-EFAULT| instead of
+crashing.
+Modern CPUs enforce this boundary in hardware.
+On x86, SMAP (Supervisor Mode Access Prevention) faults on any kernel-mode access to user pages unless the instruction is bracketed by STAC/CLAC.
+On arm64, PAN (Privileged Access Never) provides the same protection.
+The uaccess helpers issue the required instructions on the kernel's behalf; raw pointer dereference does not, so it triggers an immediate hardware exception rather than a subtle data-corruption bug.
 
 These helpers may sleep because servicing a page fault can require blocking.
 As a result, they must not be called while holding spinlocks, from hardirq
@@ -3512,6 +3691,35 @@ In a kernel module, you can only use kernel functions which are the functions yo
 \subsection{Disabling interrupts}
 \label{sec:disabling_interrupts}
 You might need to do this for a short time and that is OK, but if you do not enable them afterwards, your system will be stuck and you will have to power it off.
+
+\subsection{Kernel stack is small}
+\label{sec:stack_limit}
+Kernel stack size is architecture- and configuration-dependent, and is much smaller than the megabytes available to user-space processes.
+On many systems it is on the order of a few pages (for example, often 8\,KiB or 16\,KiB), and some architectures use separate per-CPU IRQ stacks so interrupt frames do not always share the task stack.
+Either way, every function call and local variable consumes scarce kernel stack space.
+If you declare a large array on the stack or recurse too deeply, you will silently corrupt adjacent memory or trigger a kernel panic.
+Use \cpp|kmalloc()| or \cpp|kzalloc()| for any buffer larger than a few hundred bytes, and keep function nesting shallow.
+Static analysis tools such as \sh|gcc -fstack-usage| or \sh|scripts/checkstack.pl| in the kernel tree can help spot stack-heavy functions.
+
+\subsection{No floating point in the kernel}
+\label{sec:no_fp}
+Kernel code must not use floating-point arithmetic.
+Ordinary kernel code cannot assume that FPU/SIMD state is available or may be used freely, so using \cpp|float| or \cpp|double| variables without the proper kernel helpers can corrupt user-space state or break kernel execution.
+If you need fixed-point math or division, use integer arithmetic with appropriate scaling.
+In the rare case where FPU use is genuinely required (e.g.\ certain crypto or media code), bracket it with \cpp|kernel_fpu_begin()| and \cpp|kernel_fpu_end()|, but only from process context, never from interrupt context.
+
+\subsection{Initialize buffers before copying to user space}
+\label{sec:preinit_buffer}
+When a driver copies data to user space via \cpp|copy_to_user()| or similar, every byte of the source buffer must be initialized.
+If the buffer contains uninitialized padding bytes (common with structs due to alignment) or leftover data from a previous allocation, that kernel memory leaks to user space.
+This is an information-disclosure vulnerability.
+Use \cpp|kzalloc()| instead of \cpp|kmalloc()|, or zero out padding with \cpp|memset()|, before copying data out.
+
+\subsection{Double-underscore functions are internal}
+\label{sec:double_underscore}
+Functions and macros prefixed with double underscores (e.g.\ \cpp|__kmalloc()|, \cpp|__list_add()|) are lower-level interfaces intended for specific internal use cases.
+They may assume preconditions that the public wrapper documents or enforces, such as caller-held locks or pre-validated arguments.
+The exact difference is API-specific, so always prefer the non-underscored wrapper (e.g.\ \cpp|kmalloc()|, \cpp|list_add()|) unless the kernel documentation explicitly calls for the underscore variant in your situation.
 
 \section{Where To Go From Here?}
 \label{sec:where_to_go}

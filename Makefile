@@ -13,6 +13,7 @@ html: lkmpg.tex html.cfg assets/Manrope_variable.ttf $(wildcard examples/*.[ch] 
 	import re, sys; \
 	f=open('html/lkmpg-for-ht.html','r'); s=f.read(); f.close(); \
 	s=re.sub(r\"(<span class='ecrm-0500'>\d+)([ ]+)</span>\",lambda m:m.group(1)+'</span>'+' '*int(len(m.group(2))*4/7),s); \
+	s=re.sub(r\"(<span class='ecrm-0500'>\d+)\n</span>\",lambda m:m.group(1)+'</span>\n',s); \
 	f=open('html/lkmpg-for-ht.html','w'); f.write(s); f.close()"
 	ln -sf lkmpg-for-ht.html html/index.html
 	cp assets/Manrope_variable.ttf html/Manrope_variable.ttf
